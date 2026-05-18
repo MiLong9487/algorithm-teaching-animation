@@ -124,6 +124,7 @@ manim -pqh generated_algo_scene.py AlgorithmAnimation
 - 文字是否可讀
 - 畫面是否過擠或過亂
 - 位置是否穩定
+- panel、legend、圖標籤、動態文字、表格、結論文字是否重疊、貼邊或溢出
 - 若使用者要求字幕，字幕是否遮住主體內容
 - 若使用者要求字幕，字幕列是否讓畫面主焦點變得擁擠
 
@@ -133,7 +134,11 @@ manim -pqh generated_algo_scene.py AlgorithmAnimation
 - 完成狀態與焦點狀態顏色太接近
 - pointer 過於搶眼或太難看見
 - 資料結構位置亂跳
+- 動態路徑文字、不變量說明或結論文字超出 panel
+- panel 蓋住節點、邊標籤、標題訊息或字幕安全區
 - 選配字幕與圖形重疊，導致版面過擠
+
+若需要自動輔助檢查，讀 `manim-layout-audit.md`，將 `scripts/manim_layout_audit.py` 複製到 Manim 專案，並在穩定畫面狀態後呼叫 audit。audit warning 必須再對照 render 或靜止幀，避免把過渡動畫中的暫時狀態誤判為排版問題。
 
 ### D. 節奏、旁白與感知性
 
@@ -326,7 +331,8 @@ Preview 不要求完美，但必須足夠讓人做出正確判斷。
 3. 主焦點是否清楚
 4. 教學 beat 是否成立
 5. 不變量是否有被看見
-6. 決定是否進入下一輪 refinement 或 final render
+6. 若場景有 panel、動態文字、圖標籤、表格、字幕或結論文字，執行 layout audit 並對照 render/靜止幀
+7. 決定是否進入下一輪 refinement 或 final render
 
 ## 與其他文件的關係
 
@@ -347,6 +353,9 @@ Preview 不要求完美，但必須足夠讓人做出正確判斷。
 
 - `visual-language.md`  
   決定畫面應如何清楚表達事件與教學重點
+
+- `manim-layout-audit.md`  
+  決定如何在 Manim mobject 建立後檢查重疊、貼邊、溢出與 frame 邊界問題
 
 - `generated_algo_scene.py`  
   是 render 的直接輸入之一
