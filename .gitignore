@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 venv/
 
+# codex superpowers related docs
+docs/
+
 # Manim / generated media
 media/
 **/media/
@@ -14,6 +17,7 @@ media/
 
 # Local sample workspaces
 quick-sort-animation/
+examples/
 
 # Local design notes
 design-notes/
