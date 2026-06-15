@@ -23,6 +23,7 @@ Review `generated_algo_scene.py` and its rendered output for fidelity to the con
 - Return to `PRE_BUILD_BRIEF` only when the scene exposes missing or conflicting upstream semantic guidance.
 - Keep styling, spacing, and layout failures separate from semantic failures.
 - Fail scenes that are visually unclear or layout-unsafe even when semantics are otherwise correct.
+- Use layout audit output as supporting evidence when available, but confirm warnings against rendered evidence before treating them as defects.
 
 ## Fail conditions
 

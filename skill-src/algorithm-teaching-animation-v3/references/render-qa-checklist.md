@@ -29,6 +29,7 @@ Review against:
 - approved `teaching_script.md`
 - `scene_review_result.md`
 - rendered media output
+- layout audit output when available
 - `voiceover_status.md` when the tier is `silent preview`
 - approved `voiceover.md`, `narration_manifest.json`, and usable audio assets when the tier includes narration
 - overlay output when overlays are enabled
@@ -71,6 +72,7 @@ Verify:
 - settled or excluded regions remain distinguishable
 - labels are readable and non-colliding
 - nothing important is cropped or hidden
+- layout audit warnings, if present, have been checked against the rendered output rather than accepted blindly
 
 ### Contract Fidelity
 

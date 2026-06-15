@@ -8,6 +8,7 @@ Implement `generated_algo_scene.py` from the confirmed brief, the approved scrip
 
 - A reviewable `generated_algo_scene.py`.
 - Render evidence sufficient for an independent reviewer to inspect viewer-facing behavior.
+- Layout audit output when dense labels, panels, tables, subtitles, dynamic text, or other collision-prone structures are present.
 - Scene-review handoff context sufficient for an independent reviewer to check contract fidelity and viewer clarity.
 - Implementation notes limited to layout or technical execution details.
 - A blocker note when implementation cannot proceed without upstream repair.

@@ -10,7 +10,7 @@ Use the bundled script `scripts/manim_layout_audit.py` as a small reusable helpe
 
 ## When to Add It
 
-Add the audit helper during `RENDER AND REVIEW` when:
+Add the audit helper during `RENDER` when:
 
 - the scene contains panels, legends, invariant boxes, dynamic path text, tables, graph labels, or multiple text regions
 - generated text comes from `action_trace.json`

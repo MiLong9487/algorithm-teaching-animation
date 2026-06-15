@@ -122,10 +122,10 @@ A runnable render is not a substitute for independent scene review.
 
 - Purpose: turn the approved brief, reviewed script, and required narration plan into scene code and render evidence.
 - Execution ownership: `delegate-eligible`
-- Executor-required references: approved `pre_build_brief.md`; `teaching_script.md`; `voiceover_status.md` when the approved delivery tier is `silent preview`; `voiceover.md`, `narration_manifest.json`, and usable assets under `audio/voiceover/` when narration is required; `references/manim-guidelines.md`
+- Executor-required references: approved `pre_build_brief.md`; `teaching_script.md`; `voiceover_status.md` when the approved delivery tier is `silent preview`; `voiceover.md`, `narration_manifest.json`, and usable assets under `audio/voiceover/` when narration is required; `references/manim-guidelines.md`; `references/manim-layout-audit.md` when the scene has dense labels, panels, tables, subtitles, dynamic text, or automated layout checks are needed
 - Orchestrator escalation references: `references/scene-review-checklist.md`; `script_review_result.md`
 - Do-not-start-until: `teaching_script.md` exists and `script_review_result.md = PASS`; when the approved delivery tier is `silent preview`, `voiceover_status.md` exists; when narration is required, the required voiceover artifacts and usable audio assets exist.
-- Required outputs: `generated_algo_scene.py`; render evidence; scene review handoff context sufficient for an independent reviewer to check contract fidelity and viewer clarity.
+- Required outputs: `generated_algo_scene.py`; render evidence; layout-audit evidence when applicable; scene review handoff context sufficient for an independent reviewer to check contract fidelity and viewer clarity.
 - Pass / exit gate: `generated_algo_scene.py` and render evidence exist, and `scene_review_result.md = PASS`; `scene_review_result.md` must be produced by an independent reviewer, not by the render executor, and a successful render run does not count as review passage.
 - Rollback target: `RENDER` for styling, spacing, timing, layout, implementation-fidelity defects, or contract mismatch when the approved brief and script are clear and the scene simply violated them; `SCRIPT` for beat-structure mismatch or script-layer incompleteness that forced scene work to guess structure, sequencing, or emphasis; `PRE_BUILD_BRIEF` for unresolved semantic ambiguity, missing upstream decisions, or contract mismatch that proves the upstream contract is incomplete or internally conflicting.
 

@@ -30,6 +30,7 @@ Review against:
 - approved `teaching_script.md`
 - `generated_algo_scene.py`
 - rendered preview or render evidence
+- layout audit output when available
 
 ## Review Questions
 
@@ -50,6 +51,7 @@ Review against:
 - Are labels and structures free of collisions?
 - Is important content kept inside safe margins?
 - If overlays are enabled, do they avoid the teaching-critical area?
+- If layout audit warnings exist, do they correspond to real visible problems in the rendered evidence, or are they intentional containment/noisy bounding boxes?
 
 ### Semantic Safety
 

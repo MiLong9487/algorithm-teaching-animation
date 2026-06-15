@@ -137,6 +137,18 @@ When overlays are enabled:
 - keep them in a stable, non-colliding region
 - avoid covering the primary teaching structure
 
+## Layout Audit
+
+When the scene contains dense labels, panels, legends, tables, subtitles, dynamic text, or conclusion text, read `references/manim-layout-audit.md` and run the bundled dry-run helper before final render review.
+
+Use the deterministic visible-object scan as a broad safety net:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py SceneClass --audit-visible
+```
+
+Treat audit warnings as candidates. Confirm important findings against a render or still frame before routing repair, because intentional containment and some arrow/path bounding boxes can be noisy.
+
 ## Constants and Styling
 
 Prefer clear semantic names over ad hoc style values.
@@ -183,6 +195,7 @@ Before handing the scene to review, verify that:
 - support structures appear only when justified by the brief
 - audio behavior and required voiceover artifacts match the selected delivery tier
 - overlay behavior matches the brief's frozen overlay policy or explicit user opt-in
+- layout audit warnings, when used, have been reviewed against render evidence and either fixed or documented as intentional/noisy
 
 ## Common Failures
 
