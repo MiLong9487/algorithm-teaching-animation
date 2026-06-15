@@ -6,7 +6,7 @@ Use this reference when reviewing or hardening `generated_algo_scene.py` for lay
 
 Manim layout bugs are best checked after mobjects exist. Static code review cannot reliably know the size of rendered `Text`, font fallback, transformed objects, or dynamic trace-driven labels.
 
-Use the bundled script `scripts/manim_layout_audit.py` as a small reusable helper copied into the generated Manim project.
+Use the bundled script `scripts/manim_layout_audit.py` as a small reusable helper copied into the generated Manim project. Use `scripts/run_manim_layout_audit.py` to execute those checks without rendering video.
 
 ## When to Add It
 
@@ -69,6 +69,63 @@ self._audit_layout(f"beat:{beat_id}", nodes, labels, panels, header=[("title", t
 self._audit_layout("final", nodes, labels, panels, extra_items=[("result", result_text)])
 ```
 
+## Fast Dry-Run Without Rendering
+
+Prefer a dry-run before rendering video:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene
+```
+
+The runner imports the scene, patches `Scene.play()` so animations jump to their final state, skips `wait()` and sound playback, and lets layout audit checkpoints print warnings. It still creates Manim mobjects, so text metrics and `arrange()` / `next_to()` geometry are real, but it does not write frames or MP4 output.
+
+Use `--fail-on-warning` for CI-like checks:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --fail-on-warning
+```
+
+Use `--traceback` when debugging scene construction errors:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --traceback
+```
+
+For a deterministic whole-scene pass that does not rely on project-specific `_audit_layout(...)` groups, add `--audit-visible`:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --audit-visible
+```
+
+This pass scans visible scene mobjects after every patched `Scene.play()` and once again after `construct()`:
+
+- warning if a visible mobject exceeds the frame
+- warning if two visible mobjects partially overlap or fully cover each other
+- info if one mobject is strictly inside another smaller-than-outer bounds without touching the outer boundary
+
+Use this pass as a broad safety net. It is deterministic and does not require hand-written groups, but it can be noisier than a scene adapter because some intentional visual relationships, such as labels inside nodes or highlight boxes around targets, are valid containment. Messages are deduplicated by level and object/bounds text so repeated stable issues do not flood the log.
+
+Useful controls:
+
+```bash
+# only scan the final construct() state
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --audit-visible --visible-final-only
+
+# cap printed unique messages; warnings still count for --fail-on-warning
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --audit-visible --visible-max-reports 80
+
+# print only warnings; suppress strict-containment info logs
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --audit-visible --visible-report-level warning
+```
+
+Limitations:
+
+- It is not a visual review. Confirm important warnings with a render or still frame before declaring the final video bad.
+- It only checks audit checkpoints that the scene code calls.
+- Custom animation logic that depends on real frame-by-frame interpolation may need a normal preview render.
+- It does not catch problems visible only between animation endpoints.
+- With `--audit-visible`, intentional containment is logged as info; intentional overlap still requires human judgment or a project-specific adapter.
+
 ## Common Checks
 
 - `check_inside_frame(name, mob, margin=0.1)` detects out-of-frame objects.
@@ -90,7 +147,19 @@ self._audit_layout("final", nodes, labels, panels, extra_items=[("result", resul
 
 ## CI Usage
 
-Default behavior prints warnings and lets render continue:
+Fast non-rendering check:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene
+```
+
+Fast non-rendering check plus deterministic whole-scene scan:
+
+```bash
+python path/to/skill/scripts/run_manim_layout_audit.py generated_algo_scene.py AlgorithmScene --audit-visible
+```
+
+Normal Manim render also prints warnings and lets render continue:
 
 ```bash
 manim -ql generated_algo_scene.py AlgorithmScene

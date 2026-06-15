@@ -138,7 +138,7 @@ manim -pqh generated_algo_scene.py AlgorithmAnimation
 - panel 蓋住節點、邊標籤、標題訊息或字幕安全區
 - 選配字幕與圖形重疊，導致版面過擠
 
-若需要自動輔助檢查，讀 `manim-layout-audit.md`，將 `scripts/manim_layout_audit.py` 複製到 Manim 專案，並在穩定畫面狀態後呼叫 audit。audit warning 必須再對照 render 或靜止幀，避免把過渡動畫中的暫時狀態誤判為排版問題。
+若需要自動輔助檢查，讀 `manim-layout-audit.md`，將 `scripts/manim_layout_audit.py` 複製到 Manim 專案，並在穩定畫面狀態後呼叫 audit。優先用 `scripts/run_manim_layout_audit.py` 做不輸出影片的 dry-run；若尚未寫 scene-specific adapter，先用 `--audit-visible` 做 deterministic 全場可視物件掃描，再視需要 render 預覽影片。audit warning 必須再對照 render 或靜止幀，避免把過渡動畫中的暫時狀態誤判為排版問題。
 
 ### D. 節奏、旁白與感知性
 
