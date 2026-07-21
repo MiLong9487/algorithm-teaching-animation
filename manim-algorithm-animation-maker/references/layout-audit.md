@@ -15,7 +15,7 @@ There are two bundled audit styles:
 
 ## When to Add It
 
-Use the audit runner during `QA`. Add the scene-specific helper during `RENDER` when:
+Use the audit runner during `QA`. Add the scene-specific helper during `SCENE_IMPLEMENTATION` when:
 
 - the scene contains panels, legends, invariant boxes, dynamic path text, tables, graph labels, or multiple text regions
 - generated text comes from `action_trace.json`
@@ -152,7 +152,7 @@ Limitations:
 - Treat generic-scan warnings as candidates that require deterministic scene-specific checks, not as findings that may be ignored.
 - Resolve a warning from code-level object semantics and named groups through `scene_layout_audit.py`.
 - Ignore transient warnings from in-between animation frames unless they persist in stable frames.
-- Verify the audited `generated_algo_scene.py` SHA-256 matches the reviewed and rendered version.
+- Verify the audited `generated_algo_scene.py` SHA-256 matches the reviewed version and the version later used for rendering.
 - Prefer fixing repeated stable-frame warnings in `generated_algo_scene.py`.
 - If the scene cannot express a needed layout state from trace data, fix the trace schema or teaching script first.
 

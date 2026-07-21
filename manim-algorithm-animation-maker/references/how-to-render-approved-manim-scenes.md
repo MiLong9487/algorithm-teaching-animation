@@ -1,6 +1,6 @@
 # How to Render Approved Manim Scenes
 
-這份文件只用於 `generated_algo_scene.py` 已通過獨立程式碼審查後的最終渲染。程式碼尚未 PASS 時不得使用本流程產生 preview 或送審 MP4。
+這份文件只用於 `generated_algo_scene.py` 已通過獨立程式碼審查與程式化 layout QA 後的最終渲染。程式碼審查或 QA 尚未 PASS 時，不得使用本流程產生 preview 或送審 MP4。
 
 ## 渲染前關卡
 
@@ -8,8 +8,9 @@
 
 - `scene_code_review_handoff.md` 存在。
 - `scene_review_result.md = PASS`。
-- `generated_algo_scene.py` 的目前 SHA-256，handoff 的 `Code SHA-256`，以及 review result 的 `Reviewed Code SHA-256` 完全一致。
-- 程式碼在 reviewer 產出 PASS 後沒有再被修改。
+- `layout_audit_result.md = PASS`。
+- `generated_algo_scene.py` 的目前 SHA-256、handoff 的 `Code SHA-256`、review result 的 `Reviewed Code SHA-256` 與 layout audit 的 `Audited Code SHA-256` 完全一致。
+- 程式碼在 reviewer 與 layout auditor 產出 PASS 後沒有再被修改。
 
 任一 hash 不一致就停止，回到程式碼送審流程；不得以舊 PASS 渲染新程式碼。
 
@@ -25,7 +26,7 @@
 
 若問題可在不改動 `generated_algo_scene.py` 的情況下解決，例如修正命令、輸出路徑或環境設定，可在保持 code hash 不變的前提下修復並重試。
 
-若修復需要改動 `generated_algo_scene.py`，必須立即停止渲染。任何程式碼變更都會使舊 `scene_code_review_handoff.md` 與 `scene_review_result.md` 失效；必須更新程式碼、重新靜態 audit、建立新 handoff 並取得新 PASS，才能重新渲染。
+若修復需要改動 `generated_algo_scene.py`，必須立即停止渲染。任何程式碼變更都會使舊 `scene_code_review_handoff.md`、`scene_review_result.md` 與 `layout_audit_result.md` 失效；必須更新程式碼、重新靜態 audit、建立新 handoff，並重新取得程式碼審查與 layout QA 的 PASS，才能重新渲染。
 
 ## `render_manifest.md`
 
@@ -39,6 +40,8 @@
 - Code SHA-256: `<與 handoff 及 review result 一致的 SHA-256>`
 - Review result: `<scene_review_result.md 的路徑>`
 - Review status: `PASS`
+- Layout audit result: `<layout_audit_result.md 的路徑>`
+- Layout audit status: `PASS`
 
 ## Render Outputs
 | 順序 | Scene | MP4 路徑 | 最後修改時間 | 檔案大小 |
@@ -56,4 +59,4 @@
 - MP4 size: `<size>`
 ```
 
-`render_manifest.md` 是「已通過審查的程式碼」與「最終 MP4」之間的版本綁定證據。manifest 建立後如果程式碼或任何 MP4 重新產生，舊 manifest 即失效，必須依目前有效關卡重新建立。
+`render_manifest.md` 是「已通過程式碼審查與 layout QA 的程式碼」與「最終 MP4」之間的版本綁定證據。manifest 建立後如果程式碼或任何 MP4 重新產生，舊 manifest 即失效，必須依目前有效關卡重新建立。

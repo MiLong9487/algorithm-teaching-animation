@@ -35,9 +35,9 @@
 
 ## 版本與失效規則
 
-`Code SHA-256` 是程式碼審查與後續渲染的版本身分。scene-reviewer 必須將實際審查的 hash 寫進 `scene_review_result.md` 的 `Reviewed Code SHA-256`。
+`Code SHA-256` 是程式碼審查、layout QA 與後續渲染的版本身分。scene-reviewer 必須將實際審查的 hash 寫進 `scene_review_result.md` 的 `Reviewed Code SHA-256`。
 
-每次修改 `generated_algo_scene.py` 後，舊的 `scene_code_review_handoff.md` 與 `scene_review_result.md` 都失效，不論變更大小。scene-writer 必須重新執行受影響範圍的靜態 audit、更新 handoff 並取得新 PASS。
+每次修改 `generated_algo_scene.py` 後，舊的 `scene_code_review_handoff.md`、`scene_review_result.md` 與 `layout_audit_result.md` 都失效，不論變更大小。scene-writer 必須重新執行受影響範圍的靜態 audit、更新 handoff，並重新取得程式碼審查與 layout QA 的 PASS。
 
 handoff 不得列出或要求本次程式碼的 MP4；MP4 只會在程式碼審查 PASS 後被產生。
 

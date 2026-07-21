@@ -4,7 +4,7 @@
 
 ## 實作責任與不可改變事項
 
-依 `animation_design.md` 實作六個獨立 Manim `Scene` 類別，不以 `Section` 代替。六個 Scene 分別對應問題與目標、核心觀念、演算法特有的重要資料與狀態、一次關鍵動作、完整演示，以及結果回顧。每個 Scene 獨立建立及清理畫面，結尾淡出至空白，下一幕再從空白淡入；程式碼通過獨立審查後，才將六幕分別渲染並依核准順序合併。
+依 `animation_design.md` 實作六個獨立 Manim `Scene` 類別，不以 `Section` 代替。六個 Scene 分別對應問題與目標、核心觀念、演算法特有的重要資料與狀態、一次關鍵動作、完整演示，以及結果回顧。每個 Scene 獨立建立及清理畫面，結尾淡出至空白，下一幕再從空白淡入；程式碼通過獨立審查與程式化 layout QA 後，才將六幕分別渲染並依核准順序合併。
 
 Scene layer 負責 layout execution、styling、timing、beat staging，以及 audio/overlay synchronization。實作必須忠於 `confirmed_requirements.md`、`animation_design.md`、`teaching_script.md`、需要維持執行忠實性時使用的 algorithm code/pseudocode、`voiceover.md`、`narration_manifest.json` 與音訊資產；不得新增演算法步驟、教學目標、support-structure 語意，或改變 movement semantics、pointer meaning、visited timing、beat 順序與已核准的 active support structure。
 
