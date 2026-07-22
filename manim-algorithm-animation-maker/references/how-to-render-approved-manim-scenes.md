@@ -14,6 +14,8 @@
 
 任一 hash 不一致就停止，回到程式碼送審流程；不得以舊 PASS 渲染新程式碼。
 
+依 `references/background-render-job.md` 建立 render plan 並執行同步 preflight。只有 preflight 與 runner 的二次預檢都通過後才能啟動渲染；啟動後由工具平台持有受管理前景 worker，agent 不等待或輪詢。
+
 ## 渲染與合併
 
 1. 使用上游要求的品質、畫面尺寸與 frame rate，依核准順序分別渲染六個 Scene。
@@ -59,4 +61,4 @@
 - MP4 size: `<size>`
 ```
 
-`render_manifest.md` 是「已通過程式碼審查與 layout QA 的程式碼」與「最終 MP4」之間的版本綁定證據。manifest 建立後如果程式碼或任何 MP4 重新產生，舊 manifest 即失效，必須依目前有效關卡重新建立。
+`render_manifest.md` 由受管理 worker 在全部輸出驗證成功後建立，是「已通過程式碼審查與 layout QA 的程式碼」與「最終 MP4」之間的版本綁定證據。manifest 建立後如果程式碼或任何 MP4 重新產生，舊 manifest 即失效，必須依目前有效關卡重新建立。

@@ -9,6 +9,10 @@ description: 當使用者要求以 Manim 將演算法名稱、範例輸入或執
 此 skill 用來把使用者的演算法需求製作成完整的 Manim 教學動畫。整個製作過程包含動畫設計、撰寫教學腳本、製作旁白、實作動畫、版面 QA 與最終渲染，並在 `RENDER` 階段結束。
 主要負責的 agent 必須確保所有步驟依序完成，並確認每個階段都符合要求。
 
+## 進入工作流程前
+
+若目前動畫專案根目錄存在 `render_status.json`，先依 `references/background-render-job.md` 執行一次 `status`。若結果為尚未確認的 `PASS`、`FAIL` 或 `INTERRUPTED`，先向使用者回報並執行 `ack`；若仍為 `STARTING` 或 `RUNNING`，只回報目前狀態，不得開始另一個 render job 或持續輪詢。
+
 ## 必要授權
 利用此 skill 完成各階段任務需要使用者核准使用 subagent。
 若目前對話中尚未取得明確授權，必須詢問：
@@ -185,14 +189,15 @@ python path/to/skill/scripts/run_layout_audit.py generated_algo_scene.py SceneCl
 只有在已取得使用 subagent 的明確授權後，才能開始此階段。
 
 ### 委派與執行
-本階段交由 `scene-writer` 執行最終渲染，詳細工作規則以 `.codex/agents/scene-writer.toml` 為準。
+本階段交由 `scene-writer` 準備並啟動由工具平台持有的受管理前景渲染，詳細工作規則以 `.codex/agents/scene-writer.toml` 為準。
 
-1. 開始前完整閱讀 `references/how-to-render-approved-manim-scenes.md`。
-2. 確認目前程式碼、handoff、review result 與 layout audit 的 Code SHA-256 完全一致，且 QA 已 PASS。
-3. 依核准順序渲染六個 Scene、合併影片並建立 `render_manifest.md`。
-4. 建立 `render_manifest.md` 後不得再改動程式碼；manifest、layout audit、handoff 與 review result 的 Code SHA-256 必須一致。
-5. 若渲染失敗但可在不改動 `generated_algo_scene.py` 的情況下修正，只修正命令、路徑或環境後重試。
-6. 若修復需要改動 `generated_algo_scene.py`，立即停止渲染；舊 handoff、review result 與 layout audit result 全部失效，必須退回 `SCENE_IMPLEMENTATION`，重新完成程式碼審查與 QA 後才能再次渲染。
+1. 開始前完整閱讀 `references/how-to-render-approved-manim-scenes.md` 與 `references/background-render-job.md`。
+2. 建立 `render_job_plan.json`，明確列出六幕、合併命令、所有必要輸入與預期輸出。
+3. 執行同步 `preflight`，逐項閱讀結果；任何 error 都必須在尚未渲染時修正，不能啟動 job。
+4. Preflight `PASS` 後，以工具平台可持續維護的長時限執行 cell 執行 `start`；不得使用 detached process、`Start-Process`、`nohup` 或 `start_new_session`。Windows 上依 render job reference 先建置 Windows App SDK helper，並以目前登入使用者的非 elevated 身分在受管理 sandbox 外執行 preflight 與 start。Runner 會再次預檢，並保持在前景直到渲染完成。
+5. 工具回傳仍在執行的 cell id 後，不得呼叫 wait。用短命令讀取 `render_status.json`；若檔案尚未建立，只能在 15 秒啟動確認期限內短暫重試。只有 `RUNNING` 或已完成的 `PASS` 才算安全啟動，確認後不得再讀取或輪詢。
+6. 回報 job id、cell id、`render_status.json` 與 `render.log` 路徑後立即結束 agent 工作；不得等待 render、持續讀 log 或輪詢狀態。工具平台持有的前景 worker 負責六幕渲染、合併、驗證輸出、建立 `render_manifest.md`、更新狀態檔與顯示桌面通知。
+7. 若最終 `FAIL` 或 `INTERRUPTED`，下次對話依狀態檔回報；任何程式碼修正都退回 `SCENE_IMPLEMENTATION`，重新完成 review 與 QA。
 
 ### 必要輸出
 建立：
@@ -200,9 +205,10 @@ python path/to/skill/scripts/run_layout_audit.py generated_algo_scene.py SceneCl
 - 由通過程式碼審查與 QA 的同一份程式碼產生的六個 Scene MP4
 - 最終合併 MP4
 - `render_manifest.md`
+- `render_status.json = PASS`，且已記錄桌面通知結果
 
 ### 通過／離開關卡
-僅當六個 Scene MP4、最終合併 MP4 與 `render_manifest.md` 均存在，且 manifest 的 Code SHA-256 與目前程式碼、handoff、review result、layout audit 完全一致時，才能完成工作流程。
+受管理 render job 啟動後不得立即聲稱工作流程完成。僅當下次狀態確認顯示 `render_status.json = PASS`，六個 Scene MP4、最終合併 MP4 與 `render_manifest.md` 均存在，且 manifest 的 Code SHA-256 與目前程式碼、handoff、review result、layout audit 完全一致時，才能完成工作流程。
 
 ### 發生問題時退回
 MP4 或 manifest 的產物存在性與完整性問題留在 `RENDER` 修正；任何程式碼變更都退回 `SCENE_IMPLEMENTATION`，並使後續 review、QA 與 render 證據失效。
@@ -241,4 +247,5 @@ MP4 或 manifest 的產物存在性與完整性問題留在 `RENDER` 修正；�
 - `scene_review_result.md = PASS`，且由獨立 reviewer 產出。
 - `layout_audit_result.md = PASS`，涵蓋所有交付 Scene class，且在渲染前完成。
 - 六個 Scene MP4、最終合併 MP4 與 `render_manifest.md` 都已建立。
+- `render_status.json = PASS`，且已向使用者回報並記錄 `acknowledged_at`。
 - handoff、review result、layout audit、render manifest 的 Code SHA-256 與目前 `generated_algo_scene.py` 完全一致。
