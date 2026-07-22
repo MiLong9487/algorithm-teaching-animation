@@ -187,12 +187,22 @@ python path/to/skill/scripts/run_layout_audit.py generated_algo_scene.py SceneCl
 ### 委派與執行
 本階段交由 `scene-writer` 執行最終渲染，詳細工作規則以 `.codex/agents/scene-writer.toml` 為準。
 
+<<<<<<< Updated upstream
 1. 開始前完整閱讀 `references/how-to-render-approved-manim-scenes.md`。
 2. 確認目前程式碼、handoff、review result 與 layout audit 的 Code SHA-256 完全一致，且 QA 已 PASS。
 3. 依核准順序渲染六個 Scene、合併影片並建立 `render_manifest.md`。
 4. 建立 `render_manifest.md` 後不得再改動程式碼；manifest、layout audit、handoff 與 review result 的 Code SHA-256 必須一致。
 5. 若渲染失敗但可在不改動 `generated_algo_scene.py` 的情況下修正，只修正命令、路徑或環境後重試。
 6. 若修復需要改動 `generated_algo_scene.py`，立即停止渲染；舊 handoff、review result 與 layout audit result 全部失效，必須退回 `SCENE_IMPLEMENTATION`，重新完成程式碼審查與 QA 後才能再次渲染。
+=======
+1. 開始前完整閱讀 `references/how-to-render-approved-manim-scenes.md` 與 `references/background-render-job.md`。
+2. 建立 `render_job_plan.json`，明確列出六幕、合併命令、所有必要輸入與預期輸出。
+3. 執行同步 `preflight`，逐項閱讀結果；任何 error 都必須在尚未渲染時修正，不能啟動 job。
+4. Preflight `PASS` 後，以工具平台可持續維護的長時限執行 cell 執行 `start`；不得使用 detached process、`Start-Process`、`nohup` 或 `start_new_session`。Runner 會再次預檢，並保持在前景直到渲染完成。
+5. 工具回傳仍在執行的 cell id 後，不得呼叫 wait。用短命令讀取 `render_status.json`；若檔案尚未建立，只能在 15 秒啟動確認期限內短暫重試。只有 `RUNNING` 或已完成的 `PASS` 才算安全啟動，確認後不得再讀取或輪詢。
+6. 回報 job id、cell id、`render_status.json` 與 `render.log` 路徑後立即結束 agent 工作；不得等待 render、持續讀 log 或輪詢狀態。工具平台持有的前景 worker 負責六幕渲染、合併、驗證輸出、建立 `render_manifest.md` 與更新狀態檔；不發送桌面或外部通知。
+7. 若最終 `FAIL` 或 `INTERRUPTED`，下次對話依狀態檔回報；任何程式碼修正都退回 `SCENE_IMPLEMENTATION`，重新完成 review 與 QA。
+>>>>>>> Stashed changes
 
 ### 必要輸出
 建立：
@@ -200,6 +210,10 @@ python path/to/skill/scripts/run_layout_audit.py generated_algo_scene.py SceneCl
 - 由通過程式碼審查與 QA 的同一份程式碼產生的六個 Scene MP4
 - 最終合併 MP4
 - `render_manifest.md`
+<<<<<<< Updated upstream
+=======
+- `render_status.json = PASS`
+>>>>>>> Stashed changes
 
 ### 通過／離開關卡
 僅當六個 Scene MP4、最終合併 MP4 與 `render_manifest.md` 均存在，且 manifest 的 Code SHA-256 與目前程式碼、handoff、review result、layout audit 完全一致時，才能完成工作流程。

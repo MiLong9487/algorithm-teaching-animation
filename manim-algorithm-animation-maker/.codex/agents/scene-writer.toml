@@ -73,7 +73,13 @@ developer_instructions = """
 - `scene_code_review_handoff.md` 記錄的 Code SHA-256 也與目前程式碼一致。
 - `layout_audit_result.md` 記錄的 Audited Code SHA-256 也與目前程式碼一致。
 
+<<<<<<< Updated upstream
 開始前閱讀 `references/how-to-render-approved-manim-scenes.md`，依其規則渲染六個 Scene、依核准順序合併，並建立 `render_manifest.md`。最後的 manifest、layout audit、handoff 與 review result 必須指向同一個 Code SHA-256。
+=======
+開始前閱讀 `references/how-to-render-approved-manim-scenes.md` 與 `references/background-render-job.md`。建立完整 `render_job_plan.json`，將所有音訊、字型、資料檔及合併輸入列為 required inputs，並使用 `scripts/render_job.py preflight` 檢查 gate、hash、語法、executables、輸入、輸出與磁碟空間。Runner 不發送桌面或外部通知，也不需要通知套件或 GUI 權限。
+
+只有 preflight `PASS` 才在工具平台可持續維護的長時限執行 cell 中執行 `scripts/render_job.py start`。不得加上 detached flags，不得使用 `Start-Process`、`nohup` 或 `start_new_session`。`start` 必須保持在前景，直到渲染完成；工具回傳仍在執行的 cell id 後，不得呼叫 wait，只用短命令讀取 `render_status.json`。若 cell 剛建立而狀態檔尚不存在，只能在 15 秒啟動確認期限內短暫重試；狀態一旦為 `RUNNING` 就停止讀取。然後回傳 job id、cell id、`render_status.json` 與 `render.log` 路徑並立即結束；不得等待渲染、反覆讀 log 或輪詢。工具平台持有的 worker 負責渲染、合併、manifest 與狀態檔；不發送通知。不得由你提前建立 `render_manifest.md`。
+>>>>>>> Stashed changes
 
 如果只是工具、路徑、輸出目錄或其他不需要改動程式碼的技術問題，可在保持 code hash 不變的前提下安全修復並重試。如果修復需要改動 `generated_algo_scene.py`，必須立即停止渲染，回報協調者，使舊 review 與 QA PASS 失效，回到程式碼實作、獨立審查與 QA 流程。
 
