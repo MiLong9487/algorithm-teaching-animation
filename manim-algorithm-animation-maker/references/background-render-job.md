@@ -37,7 +37,8 @@
   "status_path": "render_status.json",
   "log_path": "render.log",
   "minimum_free_bytes": 1073741824,
-  "allow_overwrite": false
+  "allow_overwrite": false,
+  "notify": true
 }
 ```
 
@@ -53,7 +54,13 @@
 python path/to/skill/scripts/render_job.py preflight render_job_plan.json
 ```
 
-Preflight 必須為 `PASS`。它會檢查 code/review/QA hash、正式 PASS、Python 語法、六幕與合併輸出覆蓋、必要輸入、允許的 executables、可寫目錄、磁碟空間與舊 job。Runner 不發送桌面或外部通知，也不需要通知套件、GUI 權限或桌面 session。
+Preflight 必須為 `PASS`。它會檢查 code/review/QA hash、正式 PASS、Python 語法、六幕與合併輸出覆蓋、必要輸入、允許的 executables、可寫目錄、磁碟空間、舊 job 與桌面通知環境。
+
+Windows 通知只使用 `render_job.py` 內建的 Python／PowerShell WinRT 路徑，不需要 .NET、NuGet、Windows App SDK 或額外 helper。Runner 會用 `Get-StartApps` 解析已註冊的 PowerShell／Terminal App ID，再由非互動式 PowerShell 提交 Toast；不得以任意未註冊名稱取代 App ID。
+
+Windows 上的同步 `preflight` 與後續 `start` 必須使用相同的工具權限：都在受管理 sandbox 外、目前已登入使用者的非 elevated desktop session 執行。對兩個命令提出範圍明確的 sandbox／GUI 權限請求；這不是要求以系統管理員身分執行。
+
+Preflight 會在 Python 中記錄 mechanism、identity、Session ID、elevated 與 App ID。`start` 的二次 preflight 與 worker 的三次 preflight 必須得到相同 fingerprint；App ID 解析失敗、elevated 或 fingerprint 改變都要在 render 前阻止 job。
 
 Preflight 通過後，在工具平台可持續維護、且 timeout 長於預期 render 時間的執行 cell 中執行：
 
@@ -61,7 +68,7 @@ Preflight 通過後，在工具平台可持續維護、且 timeout 長於預期 
 python -u path/to/skill/scripts/render_job.py start render_job_plan.json
 ```
 
-`start` 會再次執行相同預檢，接著在同一個前景程序中執行全部 commands；不得替它增加任何 detached flags。工具平台回傳仍在執行的 cell id 後：
+Windows 上必須以和同步 preflight 相同的 sandbox 外、非 elevated desktop session 啟動 `start`。`start` 會再次執行相同預檢，接著在同一個前景程序中執行全部 commands；不得替它增加任何 detached flags。工具平台回傳仍在執行的 cell id 後：
 
 1. 不得對該 cell 呼叫 wait，也不得持續讀取它的輸出。
 2. 另用短命令執行 `status render_status.json`，確認狀態是 `RUNNING`；如果 render 很快完成，`PASS` 也可接受。若 cell 剛建立而狀態檔尚不存在，只能在 15 秒的啟動確認期限內短暫重試；檔案一旦出現就停止，進入 `RUNNING` 後絕不再輪詢。
@@ -69,7 +76,7 @@ python -u path/to/skill/scripts/render_job.py start render_job_plan.json
 
 長時限是避免工具平台因 command timeout 主動終止 worker；它不表示 agent 必須保持回覆或消耗 token 等待。若平台沒有回傳可持續維護的執行 cell，則不得啟動 render，應回報目前環境不支援此工作模式。
 
-Worker 依序執行 commands，在每個 command 前重新驗證 code hash，並在執行期間自行更新 heartbeat；agent 不需輪詢。最後驗證六個 MP4 與合併 MP4 非空、自動建立 `render_manifest.md`，並原子更新 `render_status.json`。完成後不發送通知；下次對話依狀態檔回報結果。
+Worker 依序執行 commands，在每個 command 前重新驗證 code hash，並在執行期間自行更新 heartbeat；agent 不需輪詢。最後驗證六個 MP4 與合併 MP4 非空、自動建立 `render_manifest.md`，並原子更新 `render_status.json`。結束時由 Python runner 透過 PowerShell WinRT 桌面通知回報 `PASS` 或 `FAIL`；通知提交時的 context 必須與 render 前 fingerprint 相同。狀態檔以 `notification.submitted` 記錄是否成功提交，因為 Windows 不提供使用者實際看見通知的回執。通知失敗只記錄結構化 error，不改寫已完成的 render 結果。
 
 ## Next conversation
 
@@ -79,7 +86,7 @@ Worker 依序執行 commands，在每個 command 前重新驗證 code hash，並
 python path/to/skill/scripts/render_job.py status render_status.json
 ```
 
-- `PASS`：向使用者回報合併影片與 manifest，再執行 `ack`。
+- `PASS`：向使用者回報合併影片、manifest 與通知結果，再執行 `ack`。
 - `FAIL`：回報 error 與 log 路徑，不自動修改程式碼，再執行 `ack`。
 - `INTERRUPTED`：表示前一次受管理前景程序已不存在；回報 error 與 log 路徑，再執行 `ack`。不得把它誤報成仍在渲染。
 - `STARTING` 或 `RUNNING`：只回報仍在執行，不輪詢，也不 ack。

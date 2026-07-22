@@ -5,6 +5,7 @@ import ctypes
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -117,11 +118,71 @@ def resolve_executable(command: list[str]) -> str | None:
     return executable if Path(executable).is_file() else shutil.which(executable)
 
 
+def windows_toast_app_id() -> str:
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        raise RuntimeError("Windows PowerShell 5.1 is unavailable")
+    command = (
+        "$ErrorActionPreference='Stop';"
+        "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
+        "$apps=Get-StartApps;"
+        "$names=@('PowerShell 7 (x64)','PowerShell 7','Windows PowerShell','Windows Terminal');"
+        "foreach($name in $names){"
+        "$match=$apps|Where-Object{$_.Name -eq $name}|Select-Object -First 1;"
+        "if($match -and $match.AppID){[Console]::Write($match.AppID);exit 0}"
+        "};"
+        "throw 'No supported registered toast source was found'"
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    app_id = result.stdout.strip()
+    if result.returncode != 0 or not app_id:
+        detail = result.stderr.strip() or "no registered App ID returned"
+        raise RuntimeError(f"cannot resolve a registered Windows toast source: {detail}")
+    return app_id
+
+
+def windows_process_context(app_id: str) -> dict[str, Any]:
+    session_id = ctypes.c_ulong()
+    if not ctypes.windll.kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session_id)):
+        raise RuntimeError("cannot resolve the current Windows Session ID")
+    identity_result = subprocess.run(
+        ["whoami.exe"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if identity_result.returncode != 0 or not identity_result.stdout.strip():
+        raise RuntimeError("cannot resolve the current Windows identity")
+    return {
+        "mechanism": "Python PowerShell WinRT",
+        "identity": identity_result.stdout.strip(),
+        "session_id": session_id.value,
+        "elevated": bool(ctypes.windll.shell32.IsUserAnAdmin()),
+        "app_id": app_id,
+    }
+
+
+def notifier_fingerprint(context: Any) -> dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    return {key: context.get(key) for key in ("mechanism", "identity", "session_id", "elevated", "app_id")}
+
+
 def preflight(plan_path: Path, active_job_id: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     plan_path = plan_path.resolve()
     plan = load_json(plan_path)
     errors: list[str] = []
     checks: list[str] = []
+    notification_context: dict[str, Any] | None = None
 
     if plan.get("version") != 1:
         errors.append("version must be 1")
@@ -263,6 +324,31 @@ def preflight(plan_path: Path, active_job_id: str | None = None) -> tuple[dict[s
     if not isinstance(env, dict) or not all(isinstance(key, str) and isinstance(value, (str, int, float, bool)) for key, value in env.items()):
         errors.append("env must be an object with string keys and scalar values")
 
+    notify_enabled = plan.get("notify", True)
+    if not isinstance(notify_enabled, bool):
+        errors.append("notify must be true or false")
+    elif notify_enabled:
+        system = platform.system()
+        if system == "Windows":
+            try:
+                app_id = windows_toast_app_id()
+                context = windows_process_context(app_id)
+                if context.get("elevated"):
+                    raise RuntimeError("desktop notification must run from the non-elevated desktop session")
+                notification_context = notifier_fingerprint(context)
+                checks.append(
+                    "Python WinRT notifier preflight passed "
+                    f"(identity={context.get('identity')}, session={context.get('session_id')}, app_id={app_id})"
+                )
+            except (OSError, RuntimeError) as exc:
+                errors.append(str(exc))
+        else:
+            notifier = "osascript" if system == "Darwin" else "notify-send"
+            if shutil.which(notifier) is None:
+                errors.append(f"desktop notifier is unavailable: {notifier}")
+            else:
+                checks.append(f"desktop notifier is available: {notifier}")
+
     status = paths.get("status_path")
     if status and status.is_file():
         try:
@@ -280,6 +366,8 @@ def preflight(plan_path: Path, active_job_id: str | None = None) -> tuple[dict[s
         "checks": checks,
         "errors": errors,
     }
+    if notification_context is not None:
+        report["notification_context"] = notification_context
     return plan, report
 
 
@@ -290,6 +378,56 @@ def plan_paths(plan_path: Path, plan: dict[str, Any]) -> tuple[Path, Path, Path]
         inside(project, str(plan["log_path"]), "log_path"),
         project,
     )
+
+
+def notify(title: str, message: str, expected_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    system = platform.system()
+    try:
+        if system == "Windows":
+            app_id = windows_toast_app_id()
+            actual_context = notifier_fingerprint(windows_process_context(app_id))
+            if expected_context is not None and actual_context != notifier_fingerprint(expected_context):
+                raise RuntimeError(
+                    f"notification environment changed: expected {notifier_fingerprint(expected_context)}, "
+                    f"found {actual_context}"
+                )
+            env = os.environ.copy()
+            env["RENDER_NOTIFY_TITLE"] = title
+            env["RENDER_NOTIFY_MESSAGE"] = message
+            env["RENDER_NOTIFY_APP_ID"] = app_id
+            command = (
+                "$ErrorActionPreference='Stop';"
+                "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]>$null;"
+                "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]>$null;"
+                "$x=[Windows.Data.Xml.Dom.XmlDocument]::new();"
+                "$x.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text></text><text></text></binding></visual></toast>');"
+                "$n=$x.GetElementsByTagName('text');$n.Item(0).AppendChild($x.CreateTextNode($env:RENDER_NOTIFY_TITLE))>$null;"
+                "$n.Item(1).AppendChild($x.CreateTextNode($env:RENDER_NOTIFY_MESSAGE))>$null;"
+                "$t=[Windows.UI.Notifications.ToastNotification]::new($x);"
+                "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:RENDER_NOTIFY_APP_ID).Show($t)"
+            )
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                env=env,
+                check=True,
+                timeout=15,
+            )
+            return {
+                "submitted": True,
+                "attempted_at": now(),
+                "channel": "Python PowerShell WinRT desktop",
+                "context": actual_context,
+            }
+        if system == "Darwin":
+            script = 'display notification (system attribute "RENDER_NOTIFY_MESSAGE") with title (system attribute "RENDER_NOTIFY_TITLE")'
+            env = os.environ.copy()
+            env.update(RENDER_NOTIFY_TITLE=title, RENDER_NOTIFY_MESSAGE=message)
+            subprocess.run(["osascript", "-e", script], env=env, check=True, timeout=15)
+        else:
+            subprocess.run(["notify-send", title, message], check=True, timeout=15)
+        return {"submitted": True, "attempted_at": now(), "channel": f"{system} desktop"}
+    except Exception as exc:
+        return {"submitted": False, "attempted_at": now(), "channel": f"{system} desktop", "error": str(exc)}
 
 
 def write_manifest(plan_path: Path, plan: dict[str, Any], project: Path) -> Path:
@@ -339,6 +477,12 @@ def worker(plan_path: Path, job_id: str) -> int:
         _, worker_report = preflight(plan_path, active_job_id=job_id)
         if worker_report["result"] != "PASS":
             raise RuntimeError("worker preflight failed: " + "; ".join(worker_report["errors"]))
+        if platform.system() == "Windows" and plan.get("notify", True):
+            launch_context = notifier_fingerprint(launch_state.get("notification_context"))
+            worker_context = notifier_fingerprint(worker_report.get("notification_context"))
+            if launch_context != worker_context:
+                raise RuntimeError(f"notification environment changed before render: {launch_context} != {worker_context}")
+            state["notification_context"] = worker_context
         atomic_json(status_path, state)
         print(json.dumps(state, ensure_ascii=False, indent=2), flush=True)
         with log_path.open("a", encoding="utf-8") as log:
@@ -385,9 +529,21 @@ def worker(plan_path: Path, job_id: str) -> int:
             manifest = write_manifest(plan_path, plan, project)
             state.update(status="PASS", finished_at=now(), heartbeat_at=now(), current_command=None, command_pid=None, manifest=str(manifest), combined_mp4=str(combined))
             atomic_json(status_path, state)
+            state["notification"] = notify(
+                "Manim render completed",
+                f"PASS: {combined}",
+                state.get("notification_context"),
+            ) if plan.get("notify", True) else {"submitted": False, "channel": "disabled"}
+            atomic_json(status_path, state)
             return 0
     except Exception as exc:
         state.update(status="FAIL", finished_at=now(), heartbeat_at=now(), current_command=None, command_pid=None, error=str(exc), traceback=traceback.format_exc())
+        atomic_json(status_path, state)
+        state["notification"] = notify(
+            "Manim render failed",
+            f"FAIL: {exc}. See {log_path}",
+            state.get("notification_context"),
+        ) if plan.get("notify", True) else {"submitted": False, "channel": "disabled"}
         atomic_json(status_path, state)
         return 1
 
@@ -407,6 +563,7 @@ def start(plan_path: Path) -> int:
         "started_at": now(),
         "plan": str(plan_path.resolve()),
         "status_path": str(status_path),
+        "notification_context": report.get("notification_context"),
         "acknowledged_at": None,
     }
     atomic_json(status_path, starting)
