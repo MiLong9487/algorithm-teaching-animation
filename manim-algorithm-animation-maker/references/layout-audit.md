@@ -1,6 +1,6 @@
 # Layout Audit
 
-在 Stage 4 `LAYOUT_VERIFICATION` 使用本文件。Audit 會建立真實 Manim mobjects 並把動畫直接推到穩定狀態，但不寫 frame 或 MP4。
+在 Stage 4 `LAYOUT VERIFICATION AND TRIAGE` 使用本文件。Audit 會建立真實 Manim mobjects 並把動畫直接推到穩定狀態，但不寫 frame 或 MP4。
 
 ## 執行輸入與 Preflight
 
@@ -11,8 +11,9 @@ Preflight 失敗時，建立 `layout_audit_result.md` 並寫入 `Result: FAIL` �
 ## 適用範圍
 
 - Scene Writer 只使用 project-side adapter/checkpoint contract。
-- Scene Writer 不執行 Layout Validator Preflight、必要命令或建立 `layout_audit_result.md`。
+- Scene Writer 不執行 runner、Layout Validator Preflight、必要命令，不直接整理完整 raw JSON，也不建立 `layout_audit_result.md`。
 - Layout Validator 使用 execution input/Preflight、必要命令、gate/result。
+- Scene Reviewer 在 audit 前批准 graph-root 分類，並在 final audit 前批准或拒絕 Writer 提出的 exception proposals。
 
 ## 目錄
 
@@ -25,6 +26,7 @@ Preflight 失敗時，建立 `layout_audit_result.md` 並寫入 `Result: FAIL` �
 - [文字 drawing order](#文字-drawing-order)
 - [必要 checkpoint 與命令](#必要-checkpoint-與命令)
 - [精確例外](#精確例外)
+- [Derived summary 與 triage](#derived-summary-與-triage)
 - [Gate 與完整 evidence](#gate-與完整-evidence)
 - [限制](#限制)
 
@@ -43,6 +45,7 @@ Validator 必須保留完整 finding，不得省略、截斷、摘要改寫、�
 - `run_layout_audit.py`：載入 Scene、套用 render profile、dry-run 動畫、套用精確例外、寫完整 report 並決定 exit code。
 - `visible_layout_audit.py`：階層式掃描所有可見 leaf、frame overflow、碰撞、containment、文字遮擋與有限的 graph line narrow phase。
 - `scene_layout_audit.py`：讓 Scene Writer 建立具名 adapter checkpoint，並以 `register_graph_root()` 明確註冊 graph wrapper。
+- `summarize_layout_audit.py`：確定性聚合跨 checkpoint 的相同 finding pair，建立 derived summary/triage；不改變 raw findings 或 gate。
 
 每個交付 Scene 都必須同時通過泛用掃描與 adapter。
 
@@ -106,16 +109,17 @@ Internal path 必須捕捉 card 內的 sibling 關係。例如 heading 與 panel
 
 ## Graph 與非 graph routing
 
-所有 pair 預設使用原本嚴格規則。只有「兩個 leaves 都明確且唯一地屬於同一個 registered graph root」時，圖內排版採 best-effort：finding 仍寫入完整 JSON，但 severity 為 `INFO`，不阻塞 gate，也不需要 exception。
+所有 pair 預設使用原本嚴格規則。兩個 leaves 明確且唯一地屬於同一個 registered graph root 時，圖內排版通常採 best-effort；唯一提升為 blocking 的圖內特例是實際 Circle node/node overlap。
 
-- 同 root 的 line/node、line/text、node/node、containment 與 text occlusion：保留原 AABB/drawing-order relation，但以 `INFO` 記錄。
+- 同 root 的 line/node、line/text、非 Circle node/node、containment 與 text occlusion：保留原 AABB/drawing-order relation，但以 `INFO` 記錄。
 - 同 root line-like pair：AABB 相交後執行 segment narrow phase，以減少無意義 finding。
+- 同 root Circle/Circle：AABB 相交後以圓心距離與半徑 narrow phase 判斷；實際穿透產生 `same-graph-node-overlap WARNING`，相切或只有 AABB 相交不產生 finding。非等比例變形而無法可靠視為圓時退回嚴格 AABB warning。
 - 不同 graph roots：嚴格規則。
 - graph 對 non-graph：嚴格規則。
 - non-graph 對 non-graph：嚴格規則。
 - 未分類或 membership 不明：嚴格規則。
 
-Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險低時改善明顯圖內排版，但 validator 不得把同 root INFO 升為 blocking warning，也不得要求 exception。只有真正的 graph wrapper 可註冊；不得把 panel、table、card 或整個 Scene 包成 graph 來規避嚴格 gate。
+Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險低時改善明顯圖內排版，但 validator 不得自行把 INFO 升為 warning。只有 Scene Reviewer 已確認的真正 graph wrapper 可註冊；不得把 panel、table、card、matrix、整個 Scene 或混入無關 UI 的 umbrella group 包成 graph 來規避嚴格 gate。
 
 同 graph line-like narrow phase 只處理 `Line`、`DashedLine`、`Arrow`、`DoubleArrow` 可提供的直線 start/end：
 
@@ -126,7 +130,7 @@ Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險�
 - T 字或其他不支援的線接觸：best-effort `INFO`。
 - 無法取得支援的直線幾何、曲線或 path：退回 AABB，但同 root 結果仍是 best-effort `INFO`。
 
-不要求 edge incidence metadata，也不推測 topology。Graph 對 root 外的不相關 node/text/object 仍是嚴格 pair；同 root arrow/node/text finding 則保留為 best-effort INFO。不要加入 circle intersection、polygon clipping、pixel mask、spatial library 或複雜 ownership engine。
+不要求 edge incidence metadata，也不推測 topology。Graph 對 root 外的不相關 node/text/object 仍是嚴格 pair；同 root arrow/node/text finding 則保留為 best-effort INFO。除 Circle/Circle 的常數時間精確判斷外，不加入 polygon clipping、pixel mask、spatial library 或複雜 ownership engine。
 
 ## Containment
 
@@ -200,7 +204,7 @@ Runner 會：
 
 每筆例外必須精確綁定目前受檢 scene class、checkpoint、兩個完整 object names、relation、非空 explanation、支援的 user requirement/approved design reference 與目前 source SHA-256。禁止在同一檔混入其他 Scene，並禁止 wildcard、空欄位、模糊 pair 或 free-form「看起來是故意的」。Scene、source、pair、checkpoint 或 relation 改變後，例外立即失效；stale、duplicate、unmatched、scene-mismatched 或 unsupported record 會令 gate 失敗。
 
-例外是 disposition，不是刪除：完整 JSON 中保留原 finding，標示 `accepted: true` 與 exception index。Text occlusion 只有 reference 明確指向 `confirmed_requirements.md` 或 `animation_design.md` 時可接受。以下 finding 不可由 agent 豁免：
+例外是 disposition，不是刪除：完整 JSON 中保留原 finding，標示 `accepted: true` 與 exception index。Writer 只能提出 proposal；Scene Reviewer 必須逐筆寫 `APPROVED`，Validator 才可套用。Text occlusion 只有 reference 明確指向 `confirmed_requirements.md` 或 `animation_design.md` 時可接受。以下 finding 不可豁免：
 
 - frame overflow
 - tool failure 或 exception-file error
@@ -220,6 +224,19 @@ Runner 會：
 - 所有 blocking findings
 
 只有 Preflight 通過、五個核准 Scene 全部受檢、每個 Scene 的 initial／beat／final checkpoint 完整，且五個必要 command 全部 exit `0` 時，才能寫入 `Result: PASS`。其餘情況寫入 `Result: FAIL`。
+
+## Derived summary 與 triage
+
+Validator 對五個完整 reports 執行 `summarize_layout_audit.py`，產生 `layout_audit_summary.json` 與 `layout_audit_triage.md`。Grouping key 使用 Scene report、severity、relation、完整 object pair、accepted 與 exception identity；保留 occurrence count、所有 checkpoints、message variant count、代表訊息及 raw report SHA-256。
+
+```bash
+<render-profile-python> <absolute-summarizer-path> \
+  <report-1.json> <report-2.json> <report-3.json> <report-4.json> <report-5.json> \
+  --json-output <project-root>/layout_audit_summary.json \
+  --markdown-output <project-root>/layout_audit_triage.md
+```
+
+Triage 可限制展示的 warning/INFO group 數量以節省 context，但必須明示 omitted count 並連回 summary/raw report。Scene Writer 只接收 triage 與 Coordinator 指定 groups。Raw JSON totals、findings 與 runner exit code仍是唯一 gate，不能用 grouped count 判定 PASS。
 
 ## Adapter 可用檢查
 
@@ -255,6 +272,7 @@ Runner 會：
 
 - Dry-run 只檢查每次 `play()` 完成後與 final 的穩定狀態，不檢查 animation interpolation 中間影格。
 - Line narrow phase 只支援直線 start/end；曲線與其他 path 退回 AABB。同 root 的 fallback 仍是 best-effort `INFO`，可能保留非阻塞 false positive；跨 root 或 graph 外 fallback 維持嚴格，可能保留 blocking false positive。
+- Circle narrow phase 只適用 bounds 可確認為等寬等高的 `Circle`；非等比例縮放的 Circle 退回嚴格 AABB，可能保留 blocking false positive。Graph 內裝飾性 Circle 應避免被建模成獨立 node boundary，並由 Reviewer 檢查。
 - Text 使用整體/fallback bounds，不做 glyph-level geometry。
 - 部分透明物件只依目前 opacity API 判斷，複雜 blending 可能仍有誤判。
 - Container bounds 只是 broad phase；scanner 不實作完整 graph topology 或一般計算幾何。

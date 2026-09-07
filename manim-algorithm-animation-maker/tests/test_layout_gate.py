@@ -411,13 +411,35 @@ class LayoutGateTests(unittest.TestCase):
         self.assertEqual(result.warnings, [])
         self.assertIn("overlap", self.relations(result, "INFO"))
 
-    def test_same_graph_node_versus_node_is_best_effort(self) -> None:
+    def test_same_graph_overlapping_circle_nodes_warn(self) -> None:
         first = Circle((-0.7, 0.3, -0.5, 0.5))
         second = Circle((-0.3, 0.7, -0.5, 0.5))
         root = VGroup(first, second)
         result = self.audit(root, graph_roots=[(root, "g")])
-        self.assertEqual(result.warnings, [])
-        self.assertIn("overlap", self.relations(result, "INFO"))
+        self.assertIn("same-graph-node-overlap", self.relations(result, "WARNING"))
+        self.assertEqual(result.narrow_phase_checks, 1)
+
+    def test_same_graph_circle_aabbs_can_overlap_without_node_overlap(self) -> None:
+        first = Circle((-1.0, 1.0, -1.0, 1.0))
+        second = Circle((0.5, 2.5, 0.5, 2.5))
+        root = VGroup(first, second)
+        result = self.audit(root, graph_roots=[(root, "g")])
+        self.assertNotIn("same-graph-node-overlap", self.relations(result))
+        self.assertEqual(result.narrow_phase_checks, 1)
+
+    def test_same_graph_tangent_circle_nodes_do_not_warn(self) -> None:
+        first = Circle((-1.0, 1.0, -1.0, 1.0))
+        second = Circle((1.0, 3.0, -1.0, 1.0))
+        root = VGroup(first, second)
+        result = self.audit(root, graph_roots=[(root, "g")])
+        self.assertNotIn("same-graph-node-overlap", self.relations(result))
+
+    def test_non_circular_circle_node_falls_back_to_strict_warning(self) -> None:
+        first = Circle((-1.0, 1.0, -0.5, 0.5))
+        second = Circle((-0.5, 1.5, -0.5, 0.5))
+        root = VGroup(first, second)
+        result = self.audit(root, graph_roots=[(root, "g")])
+        self.assertIn("overlap", self.relations(result, "WARNING"))
 
     def test_same_graph_text_occlusion_is_best_effort(self) -> None:
         text = Text((-1.0, 1.0, -0.4, 0.4))

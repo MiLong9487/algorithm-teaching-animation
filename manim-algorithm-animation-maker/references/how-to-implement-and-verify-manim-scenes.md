@@ -1,6 +1,6 @@
 # Manim 實作與首次靜態驗證指南
 
-本指南定義 `generated_algo_scene.py` 的實作方法與首次送檢前的靜態推理。它以 construction patterns 降低第一版 layout 失誤機率；獨立 layout validator 先檢查目前 source，獨立 scene reviewer 再在任何渲染之前檢查同一線性流程中的目前程式碼。
+本指南定義 `generated_algo_scene.py` 的實作方法與首次送檢前的靜態推理。它以 construction patterns 降低第一版 layout 失誤機率；獨立 scene reviewer 先完整檢查語義與 graph 分類，獨立 layout validator 再檢查 layout，最後由原 reviewer 聚焦複查 layout diff 與 exception proposals。
 
 ## 實作責任與不可改變事項
 
@@ -209,7 +209,7 @@ Overlays 關閉時不預留只供 overlay 使用的空間；啟用時放在 layo
 - 規劃 node labels、frontier、pointer/highlight 同時出現的 peak state；helper 共址不得遮住 node label。
 - 只有 traversal order 是教學重點時才加入 neighbor-order cues。
 - 把完整 graph 放在顯示期間 identity 穩定的 `VGroup` wrapper，並在第一次可能觸發 visible audit 的 `play()` 前呼叫 `register_graph_root(wrapper, optional_name)`。不要把一般 card、panel 或 table 註冊成 graph。Graph 完整退場時，已註冊 root 會成為 inactive，不需取消註冊。
-- 目前 Scene 中同一已註冊 wrapper 內的 graph/graph 排版 finding 採 `INFO` best-effort；line crossings 仍以 segment narrow phase 減少雜訊。不同 graph、graph 對非 graph 與未知 pair 維持嚴格。若 replacement 使用新 wrapper，在它第一次接受 audit 前註冊新 root；舊 root 缺席不會報錯。
+- 目前 Scene 中同一已註冊 wrapper 內的 graph/graph 排版通常採 `INFO` best-effort；line crossings 以 segment narrow phase 減少雜訊，但實際 Circle node/node overlap 使用圓形 narrow phase 並維持 blocking `WARNING`。不同 graph、graph 對非 graph 與未知 pair 維持嚴格。若 replacement 使用新 wrapper，在它第一次接受 audit 前註冊新 root；舊 root 缺席不會報錯。
 
 ## 寫完 Python 後：強制靜態 Audit
 
@@ -230,11 +230,11 @@ Overlays 關閉時不預留只供 overlay 使用的空間；啟用時放在 layo
 13. Graph roots 是否只註冊真正的 graph wrapper，且沒有 leaf 同時屬於多個 roots？
 14. Scene 4 的每個必要 derivation phase 是否各有 resolved checkpoint，並維持 Scene 3 的工作單位與視覺語意？
 
-若高風險定位無法由最終 bounding box、zone 容量及生命週期證明安全，先修改 layout，再重新閱讀受影響 Scene；不能把已知疑點留給後續流程首次發現。泛用 visible warning 是 blocking，不得由 writer 忽略或降級；精確例外只在使用者需求或已核准設計明確要求時依 `layout-audit.md` 建立，且應先嘗試修復 layout。
+若高風險定位無法由最終 bounding box、zone 容量及生命週期證明安全，先修改 layout，再重新閱讀受影響 Scene；不能把已知疑點留給後續流程首次發現。泛用 visible warning 是 blocking，不得由 writer 忽略或降級；精確例外只在使用者需求或已核准設計明確要求時依 `layout-audit.md` 提出 proposal，且應先嘗試修復 layout。Proposal 必須由 Scene Reviewer 批准，Writer 不得自行套用。
 
 ## CODE_PREPARATION 完成條件
 
-只有在下列條件都完成後，`generated_algo_scene.py` 才能送交 layout audit 與獨立程式碼審查；此時不執行 Manim render：
+只有在下列條件都完成後，`generated_algo_scene.py` 才能先送交獨立 pre-layout Scene Review；review 通過後才送交 Layout Validator。Scene Writer 不自行執行 runner或讀取完整 raw JSON：
 
 - 五個 Scenes 均符合核准結構、獨立建立/清理並可分別渲染。
 - 每個 Scene、每個穩定 beat 與所有 peak states 已靜態複查。

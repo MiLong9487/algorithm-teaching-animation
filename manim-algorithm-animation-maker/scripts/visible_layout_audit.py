@@ -10,6 +10,7 @@ from manim import config
 
 CONTAINER_TYPE_NAMES = {"Group", "VGroup"}
 LINE_TYPE_NAMES = {"Arrow", "DashedLine", "DoubleArrow", "Line"}
+CIRCLE_NODE_TYPE_NAMES = {"Circle"}
 TEXT_TYPE_NAMES = {"MarkupText", "MathTex", "Paragraph", "Tex", "Text"}
 VISUAL_BOUNDARY_TYPE_NAMES = {
     "Circle",
@@ -312,6 +313,8 @@ class _CheckpointAudit:
         finding_severity = "INFO" if same_graph is not None else "WARNING"
         if same_graph is not None and is_line_like(first.mobject) and is_line_like(second.mobject):
             self._audit_same_graph_lines(first, second, same_graph)
+        elif same_graph is not None and is_circle_node(first.mobject) and is_circle_node(second.mobject):
+            self._audit_same_graph_circle_nodes(first, second, same_graph)
         else:
             self._audit_strict_pair(first, second, finding_severity=finding_severity)
         self._audit_text_occlusion(first, second, finding_severity=finding_severity)
@@ -356,6 +359,38 @@ class _CheckpointAudit:
                 (first.name, second.name),
                 f"{first.name}: has unsupported line contact with {second.name} in graph {graph_name!r}",
             )
+
+    def _audit_same_graph_circle_nodes(
+        self,
+        first: VisibleItem,
+        second: VisibleItem,
+        graph_root: tuple[object, str | None],
+    ) -> None:
+        first_circle = circle_geometry(first.bounds, self.overlap_epsilon)
+        second_circle = circle_geometry(second.bounds, self.overlap_epsilon)
+        if first_circle is None or second_circle is None:
+            self._audit_strict_pair(first, second, finding_severity="WARNING")
+            return
+
+        self.narrow_phase_checks += 1
+        first_center, first_radius = first_circle
+        second_center, second_radius = second_circle
+        center_distance = hypot(
+            first_center[0] - second_center[0],
+            first_center[1] - second_center[1],
+        )
+        penetration = first_radius + second_radius - center_distance
+        if penetration <= self.overlap_epsilon:
+            return
+
+        graph_name = graph_root[1] or type(graph_root[0]).__name__
+        self._add(
+            "WARNING",
+            "same-graph-node-overlap",
+            (first.name, second.name),
+            f"{first.name}: circular node overlaps {second.name} in graph {graph_name!r} "
+            f"(center distance={center_distance:.3f}, radii={first_radius:.3f}+{second_radius:.3f})",
+        )
 
     def _audit_strict_pair(
         self,
@@ -547,6 +582,24 @@ def class_names(mobject) -> set[str]:
 
 def is_line_like(mobject) -> bool:
     return bool(class_names(mobject) & LINE_TYPE_NAMES)
+
+
+def is_circle_node(mobject) -> bool:
+    return bool(class_names(mobject) & CIRCLE_NODE_TYPE_NAMES)
+
+
+def circle_geometry(
+    bounds: Bounds,
+    tolerance: float,
+) -> tuple[tuple[float, float], float] | None:
+    if bounds.width <= tolerance or bounds.height <= tolerance:
+        return None
+    if abs(bounds.width - bounds.height) > tolerance:
+        return None
+    return (
+        ((bounds.left + bounds.right) / 2, (bounds.bottom + bounds.top) / 2),
+        (bounds.width + bounds.height) / 4,
+    )
 
 
 def is_text_like(mobject) -> bool:
