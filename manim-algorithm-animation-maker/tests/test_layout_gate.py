@@ -81,6 +81,22 @@ class Rectangle(FakeMobject):
     pass
 
 
+class Ellipse(FakeMobject):
+    pass
+
+
+class Polygon(FakeMobject):
+    pass
+
+
+class RoundedRectangle(FakeMobject):
+    pass
+
+
+class Square(FakeMobject):
+    pass
+
+
 class Circle(FakeMobject):
     pass
 
@@ -419,6 +435,30 @@ class LayoutGateTests(unittest.TestCase):
         self.assertIn("same-graph-node-overlap", self.relations(result, "WARNING"))
         self.assertEqual(result.narrow_phase_checks, 1)
 
+    def test_same_graph_overlapping_common_node_shapes_warn(self) -> None:
+        for shape_type in (Ellipse, Polygon, Rectangle, RoundedRectangle, Square):
+            with self.subTest(shape_type=shape_type.__name__):
+                first = Circle((-0.7, 0.3, -0.5, 0.5))
+                second = shape_type((-0.3, 0.7, -0.5, 0.5))
+                root = VGroup(first, second)
+                result = self.audit(root, graph_roots=[(root, "g")])
+                self.assertIn("same-graph-node-overlap", self.relations(result, "WARNING"))
+
+    def test_same_graph_node_containment_precedes_node_overlap(self) -> None:
+        highlight = Circle((-1.0, 1.0, -1.0, 1.0))
+        node = Circle((-0.4, 0.4, -0.4, 0.4))
+        root = VGroup(highlight, node)
+        result = self.audit(root, graph_roots=[(root, "g")])
+        self.assertNotIn("same-graph-node-overlap", self.relations(result))
+        self.assertEqual(result.findings, [])
+
+    def test_same_graph_node_containment_across_peer_groups_warns(self) -> None:
+        highlight = VGroup(Circle((-1.0, 1.0, -1.0, 1.0)))
+        node = VGroup(Circle((-0.4, 0.4, -0.4, 0.4)))
+        root = VGroup(highlight, node)
+        result = self.audit(root, graph_roots=[(root, "g")])
+        self.assertIn("unexpected-containment", self.relations(result, "WARNING"))
+
     def test_same_graph_circle_aabbs_can_overlap_without_node_overlap(self) -> None:
         first = Circle((-1.0, 1.0, -1.0, 1.0))
         second = Circle((0.5, 2.5, 0.5, 2.5))
@@ -439,15 +479,14 @@ class LayoutGateTests(unittest.TestCase):
         second = Circle((-0.5, 1.5, -0.5, 0.5))
         root = VGroup(first, second)
         result = self.audit(root, graph_roots=[(root, "g")])
-        self.assertIn("overlap", self.relations(result, "WARNING"))
+        self.assertIn("same-graph-node-overlap", self.relations(result, "WARNING"))
 
-    def test_same_graph_text_occlusion_is_best_effort(self) -> None:
+    def test_same_graph_text_occlusion_warns(self) -> None:
         text = Text((-1.0, 1.0, -0.4, 0.4))
         cover = Rectangle((-1.5, 1.5, -0.8, 0.8))
         root = VGroup(text, cover)
         result = self.audit(root, graph_roots=[(root, "annotated graph")])
-        self.assertEqual(result.warnings, [])
-        self.assertIn("text-occlusion", self.relations(result, "INFO"))
+        self.assertIn("text-occlusion", self.relations(result, "WARNING"))
 
     def test_sparse_graph_root_aabb_does_not_create_container_finding(self) -> None:
         first = Line((-3.0, -3.0), (-2.0, -2.0))
@@ -559,6 +598,25 @@ class LayoutGateTests(unittest.TestCase):
             graph_roots=[(first_root, "first"), (second_root, "second")],
         )
         self.assertIn("ambiguous-graph-membership", self.relations(result, "ERROR"))
+        self.assertIn("ambiguous-structural-parent", self.relations(result, "ERROR"))
+
+    def test_shared_leaf_in_peer_non_graph_groups_has_ambiguous_parent(self) -> None:
+        shared = Circle((-0.5, 0.5, -0.5, 0.5))
+        result = self.audit(VGroup(shared), VGroup(shared))
+        finding = next(
+            finding for finding in result.findings if finding.relation == "ambiguous-structural-parent"
+        )
+        self.assertEqual(finding.severity, "ERROR")
+        self.assertFalse(finding.waivable)
+
+    def test_shared_subgroup_has_ambiguous_parent(self) -> None:
+        shared = VGroup(Circle((-0.5, 0.5, -0.5, 0.5)))
+        result = self.audit(VGroup(shared), VGroup(shared))
+        self.assertIn("ambiguous-structural-parent", self.relations(result, "ERROR"))
+
+    def test_nested_single_owner_structure_is_not_ambiguous(self) -> None:
+        result = self.audit(VGroup(VGroup(Circle((-0.5, 0.5, -0.5, 0.5)))))
+        self.assertNotIn("ambiguous-structural-parent", self.relations(result))
 
     def test_frame_overflow_is_non_waivable(self) -> None:
         result = self.audit(Rectangle((-11.0, -9.0, -0.5, 0.5)))

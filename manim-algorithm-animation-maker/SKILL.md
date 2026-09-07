@@ -107,6 +107,7 @@ Scene 1–3 完成後，先決定動畫要講哪些複雜度內容。主要 Agen
 只有原本的 `scene_writer` 回報 `DONE`，且兩個 Writer Expected outputs `generated_algo_scene.py` 與 `scene_layout_audit.py` 都存在時，`CODE_PREPARATION` gate 才能通過。若回報 `BLOCKED` 或輸出不完整，留在 `CODE_PREPARATION`，使用 `followup_task` 將具體缺口交回原本的 `scene_writer`。
 
 Writer 必須依 `references/layout-audit.md` 建立 checkpoint adapter、明確註冊真正的 graph wrapper，且不得忽略、隱藏或降級泛用掃描產生的 warning。
+可見 leaf 或 subgroup 在 checkpoint 只能有一個直接 structural owner；邏輯分類使用 Python collection，不得用同時掛入 Scene 的共享 `VGroup` 製造多 parent。Graph 內文字若被上層可見物件遮擋也必須回報 blocking `WARNING`。
 
 ### 子階段 2：PRE-LAYOUT CONTRACT REVIEW
 CODE_PREPARATION gate 通過後，先依 `scene_reviewer` Dispatch Profile 初次派遣 reviewer。此時不要求 layout result；reviewer 必須完整檢查教學流程／演算法是否充分、state、beat、lifecycle、cleanup，以及每個 registered graph root 是否真為 graph 且未混入 panel、table、card、matrix、整幕或其他無關 UI。
@@ -118,7 +119,7 @@ PRELAYOUT_PASS 後，依 `scene_layout_validator` Dispatch Profile 初次派遣 
 
 Layout FAIL 時，Coordinator 只將 triage 路徑與指定 blocking groups 交回原本 Writer，不把完整 reports 注入 Writer context。Writer 不得自行執行 audit、讀取完整 raw JSON、降級 warning 或批准豁免；修正後由原 Validator 重跑。迭代可只跑受影響 Scene，但 final gate 必須完整重跑五幕。
 
-泛用可見掃描中，同 graph line/line 等排版仍為 `INFO` best-effort；同 graph 的實際 Circle node/node overlap 為 blocking `WARNING`，使用圓形 narrow phase。其他 warning 不得忽略或降級，且 `unresolved warning count > 0` 必須 `FAIL`。
+泛用可見掃描中，同 graph line/line 等排版仍為 `INFO` best-effort；常見封閉 node 外形之間先排除完整 containment，再將實際 node/node overlap 視為 blocking `WARNING`，其中 Circle/Circle 使用圓形 narrow phase。其他 warning 不得忽略或降級，且 `unresolved warning count > 0` 必須 `FAIL`。
 
 ### 子階段 4：FINAL DIFF AND EXCEPTION REVIEW
 Layout 修正收斂後，使用 `followup_task` 交回原本 reviewer。Reviewer 比較 pre-layout baseline 與目前 source：純位置、尺寸、間距、font size、z-index 等 layout-only diff 可聚焦複查；若 beat、文字、演算法資料、state、Transform ownership、helper 語意、graph-root 範圍或可見內容改變，必須回到完整 contract review。

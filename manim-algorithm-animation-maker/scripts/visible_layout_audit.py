@@ -10,7 +10,14 @@ from manim import config
 
 CONTAINER_TYPE_NAMES = {"Group", "VGroup"}
 LINE_TYPE_NAMES = {"Arrow", "DashedLine", "DoubleArrow", "Line"}
-CIRCLE_NODE_TYPE_NAMES = {"Circle"}
+NODE_SHAPE_TYPE_NAMES = {
+    "Circle",
+    "Ellipse",
+    "Polygon",
+    "Rectangle",
+    "RoundedRectangle",
+    "Square",
+}
 TEXT_TYPE_NAMES = {"MarkupText", "MathTex", "Paragraph", "Tex", "Text"}
 VISUAL_BOUNDARY_TYPE_NAMES = {
     "Circle",
@@ -133,14 +140,16 @@ class _CheckpointAudit:
         self.bounds_cache: dict[int, Bounds] = {}
         self.segment_cache: dict[int, tuple[tuple[float, float], tuple[float, float]] | None] = {}
         self.membership_index: dict[int, list[tuple[object, str | None]]] = {}
+        self.direct_parent_index: dict[int, dict[int | None, str]] = {}
+        self.object_path_index: dict[int, str] = {}
         self.seen: set[int] = set()
         self.drawing_order = 0
         self.findings: list[VisibleFinding] = []
         self.narrow_phase_checks = 0
 
     def run(self) -> VisibleAuditResult:
-        for mobject in self.scene.mobjects:
-            self._index_memberships(mobject, (), set())
+        for index, mobject in enumerate(self.scene.mobjects):
+            self._index_memberships(mobject, f"{type(mobject).__name__}[{index}]", (), set())
 
         roots: list[HierarchyNode] = []
         for index, mobject in enumerate(self.scene.mobjects):
@@ -150,6 +159,22 @@ class _CheckpointAudit:
 
         leaves = list(self._iter_leaves(roots))
         self._audit_frame(leaves)
+        visible_structure_ids = {
+            id(mobject)
+            for leaf in leaves
+            for mobject in (leaf.mobject, *leaf.structural_ancestors)
+        }
+        for object_id, parents in self.direct_parent_index.items():
+            if object_id in visible_structure_ids and len(parents) > 1:
+                name = self.object_path_index[object_id]
+                self._add(
+                    "ERROR",
+                    "ambiguous-structural-parent",
+                    (name,),
+                    f"{name}: is reachable through multiple direct structural owners "
+                    f"({', '.join(parents.values())})",
+                    waivable=False,
+                )
         for leaf in leaves:
             if len(leaf.graph_roots) > 1:
                 names = [name or type(root).__name__ for root, name in leaf.graph_roots]
@@ -187,6 +212,7 @@ class _CheckpointAudit:
     def _index_memberships(
         self,
         mobject,
+        path: str,
         structural_ancestors: tuple[object, ...],
         active_path: set[int],
     ) -> None:
@@ -200,6 +226,12 @@ class _CheckpointAudit:
         object_id = id(mobject)
         if object_id in active_path:
             return
+
+        parent = structural_ancestors[-1] if structural_ancestors else None
+        parent_id = id(parent) if parent is not None else None
+        parent_name = self.object_path_index.get(parent_id, "<scene>") if parent is not None else "<scene>"
+        self.direct_parent_index.setdefault(object_id, {}).setdefault(parent_id, parent_name)
+        self.object_path_index.setdefault(object_id, path)
 
         children = list(getattr(mobject, "submobjects", []) or [])
         is_container = bool(class_names(mobject) & CONTAINER_TYPE_NAMES) or object_id in self.graph_root_ids
@@ -215,8 +247,13 @@ class _CheckpointAudit:
 
         next_path = active_path | {object_id}
         next_ancestors = structural_ancestors + (mobject,)
-        for child in children:
-            self._index_memberships(child, next_ancestors, next_path)
+        for child_index, child in enumerate(children):
+            self._index_memberships(
+                child,
+                f"{path}.{type(child).__name__}[{child_index}]",
+                next_ancestors,
+                next_path,
+            )
 
     def _build_node(
         self,
@@ -313,11 +350,11 @@ class _CheckpointAudit:
         finding_severity = "INFO" if same_graph is not None else "WARNING"
         if same_graph is not None and is_line_like(first.mobject) and is_line_like(second.mobject):
             self._audit_same_graph_lines(first, second, same_graph)
-        elif same_graph is not None and is_circle_node(first.mobject) and is_circle_node(second.mobject):
-            self._audit_same_graph_circle_nodes(first, second, same_graph)
+        elif same_graph is not None and is_node_shape(first.mobject) and is_node_shape(second.mobject):
+            self._audit_same_graph_nodes(first, second, same_graph)
         else:
             self._audit_strict_pair(first, second, finding_severity=finding_severity)
-        self._audit_text_occlusion(first, second, finding_severity=finding_severity)
+        self._audit_text_occlusion(first, second, finding_severity="WARNING")
 
     @staticmethod
     def _same_unambiguous_graph(first: VisibleItem, second: VisibleItem) -> tuple[object, str | None] | None:
@@ -360,16 +397,29 @@ class _CheckpointAudit:
                 f"{first.name}: has unsupported line contact with {second.name} in graph {graph_name!r}",
             )
 
-    def _audit_same_graph_circle_nodes(
+    def _audit_same_graph_nodes(
         self,
         first: VisibleItem,
         second: VisibleItem,
         graph_root: tuple[object, str | None],
     ) -> None:
+        relation = classify_pair(first.bounds, second.bounds, self.containment_padding, self.overlap_epsilon)
+        if relation in {"first-inside-second", "second-inside-first"}:
+            if same_structural_parent(first, second):
+                return
+            self._audit_strict_pair(first, second, finding_severity="WARNING")
+            return
+        if relation != "overlap":
+            return
+
+        if not (is_circle_node(first.mobject) and is_circle_node(second.mobject)):
+            self._add_same_graph_node_overlap(first, second, graph_root)
+            return
+
         first_circle = circle_geometry(first.bounds, self.overlap_epsilon)
         second_circle = circle_geometry(second.bounds, self.overlap_epsilon)
         if first_circle is None or second_circle is None:
-            self._audit_strict_pair(first, second, finding_severity="WARNING")
+            self._add_same_graph_node_overlap(first, second, graph_root)
             return
 
         self.narrow_phase_checks += 1
@@ -383,13 +433,27 @@ class _CheckpointAudit:
         if penetration <= self.overlap_epsilon:
             return
 
+        self._add_same_graph_node_overlap(
+            first,
+            second,
+            graph_root,
+            detail=f"center distance={center_distance:.3f}, radii={first_radius:.3f}+{second_radius:.3f}",
+        )
+
+    def _add_same_graph_node_overlap(
+        self,
+        first: VisibleItem,
+        second: VisibleItem,
+        graph_root: tuple[object, str | None],
+        detail: str | None = None,
+    ) -> None:
         graph_name = graph_root[1] or type(graph_root[0]).__name__
+        detail_suffix = f" ({detail})" if detail else ""
         self._add(
             "WARNING",
             "same-graph-node-overlap",
             (first.name, second.name),
-            f"{first.name}: circular node overlaps {second.name} in graph {graph_name!r} "
-            f"(center distance={center_distance:.3f}, radii={first_radius:.3f}+{second_radius:.3f})",
+            f"{first.name}: node shape overlaps {second.name} in graph {graph_name!r}{detail_suffix}",
         )
 
     def _audit_strict_pair(
@@ -569,6 +633,14 @@ def is_owned_containment(inner: VisibleItem, outer: VisibleItem, graph_root_ids:
     return not (inner_below_owner and outer_below_owner)
 
 
+def same_structural_parent(first: VisibleItem, second: VisibleItem) -> bool:
+    return bool(
+        first.structural_ancestors
+        and second.structural_ancestors
+        and first.structural_ancestors[-1] is second.structural_ancestors[-1]
+    )
+
+
 def _ancestors_below(ancestors: tuple[object, ...], owner: object) -> tuple[object, ...]:
     for index in range(len(ancestors) - 1, -1, -1):
         if ancestors[index] is owner:
@@ -585,7 +657,11 @@ def is_line_like(mobject) -> bool:
 
 
 def is_circle_node(mobject) -> bool:
-    return bool(class_names(mobject) & CIRCLE_NODE_TYPE_NAMES)
+    return "Circle" in class_names(mobject)
+
+
+def is_node_shape(mobject) -> bool:
+    return bool(class_names(mobject) & NODE_SHAPE_TYPE_NAMES)
 
 
 def circle_geometry(

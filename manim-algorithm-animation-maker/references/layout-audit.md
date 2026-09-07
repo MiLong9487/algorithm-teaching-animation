@@ -109,17 +109,20 @@ Internal path 必須捕捉 card 內的 sibling 關係。例如 heading 與 panel
 
 ## Graph 與非 graph routing
 
-所有 pair 預設使用原本嚴格規則。兩個 leaves 明確且唯一地屬於同一個 registered graph root 時，圖內排版通常採 best-effort；唯一提升為 blocking 的圖內特例是實際 Circle node/node overlap。
+所有 pair 預設使用原本嚴格規則。兩個 leaves 明確且唯一地屬於同一個 registered graph root 時，圖內排版通常採 best-effort；唯一提升為 blocking 的圖內特例是常見封閉 node 外形之間的實際 overlap。
 
-- 同 root 的 line/node、line/text、非 Circle node/node、containment 與 text occlusion：保留原 AABB/drawing-order relation，但以 `INFO` 記錄。
+- 同 root 的 line/node、line/text 與一般 containment：幾何 relation 保留為 `INFO`；但若文字實際畫在遮擋物下方，會另外產生 blocking `text-occlusion WARNING`。
 - 同 root line-like pair：AABB 相交後執行 segment narrow phase，以減少無意義 finding。
-- 同 root Circle/Circle：AABB 相交後以圓心距離與半徑 narrow phase 判斷；實際穿透產生 `same-graph-node-overlap WARNING`，相切或只有 AABB 相交不產生 finding。非等比例變形而無法可靠視為圓時退回嚴格 AABB warning。
+- 同 root 的 `Circle`、`Ellipse`、`Polygon`、`Rectangle`、`RoundedRectangle`、`Square`（含其 subclasses）先判斷完整 containment；同一直接 structural parent 下的包含是正常 owner/content 關係，不產生 finding，不同子組或 container 間的包含維持 `WARNING`。其餘 overlap 產生 `same-graph-node-overlap WARNING`。
+- Circle/Circle 在排除 containment 後，以圓心距離與半徑 narrow phase 判斷；實際穿透才產生 warning，相切或只有 AABB 相交不產生 finding。其他 node 外形維持常數時間 AABB 判斷，不加入 polygon clipping 或 pixel mask。
 - 不同 graph roots：嚴格規則。
 - graph 對 non-graph：嚴格規則。
 - non-graph 對 non-graph：嚴格規則。
 - 未分類或 membership 不明：嚴格規則。
 
 Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險低時改善明顯圖內排版，但 validator 不得自行把 INFO 升為 warning。只有 Scene Reviewer 已確認的真正 graph wrapper 可註冊；不得把 panel、table、card、matrix、整個 Scene 或混入無關 UI 的 umbrella group 包成 graph 來規避嚴格 gate。
+
+每個 audit checkpoint 的可見 ownership 結構必須是一棵樹：leaf 或 subgroup 可以有多層巢狀 ancestors，但只能有一個直接 structural owner。同一物件若可由多個平行 Scene-visible branches 到達，產生不可豁免的 `ambiguous-structural-parent ERROR`。需要邏輯分類時使用 Python list/dict/set；暫時操作用的 `VGroup` 不得同時加入 Scene 或註冊成 graph root。`ambiguous-graph-membership ERROR` 仍獨立檢查巢狀或重疊 graph roots。
 
 同 graph line-like narrow phase 只處理 `Line`、`DashedLine`、`Arrow`、`DoubleArrow` 可提供的直線 start/end：
 
@@ -130,12 +133,12 @@ Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險�
 - T 字或其他不支援的線接觸：best-effort `INFO`。
 - 無法取得支援的直線幾何、曲線或 path：退回 AABB，但同 root 結果仍是 best-effort `INFO`。
 
-不要求 edge incidence metadata，也不推測 topology。Graph 對 root 外的不相關 node/text/object 仍是嚴格 pair；同 root arrow/node/text finding 則保留為 best-effort INFO。除 Circle/Circle 的常數時間精確判斷外，不加入 polygon clipping、pixel mask、spatial library 或複雜 ownership engine。
+不要求 edge incidence metadata，也不推測 topology。Graph 對 root 外的不相關 node/text/object 仍是嚴格 pair；同 root arrow/node/text 的一般幾何 finding 保留為 best-effort INFO，但文字遮擋另為 WARNING。除 Circle/Circle 的常數時間精確判斷外，不加入 polygon clipping、pixel mask、spatial library 或複雜 ownership engine。
 
 ## Containment
 
 - 同一個非 graph structural owner 內，內容或 node label 完全位於自己的可見 panel/node boundary 內，且內容依 drawing order 位於 boundary 上方：正常 containment，不產生 finding。
-- 同一 graph root 內的 containment 無論 ownership heuristic 結果如何，都只作 best-effort `INFO`。
+- 同一直接 structural parent 下的完整 containment 不產生 finding；同 graph 但位於不同子組或 container 的 node shapes 仍維持 `WARNING`。
 - 獨立 peer containers、不同 containers 的 objects，或其他不具 ownership ancestry 的嚴格 containment：`WARNING`。
 - 合法 ancestor/descendant 或明確 nested owner 不視為獨立 peer。
 - 不相關 opaque object 完全蓋住另一物件仍是 `WARNING`，不能因為「完全包含」而降為 INFO。
@@ -147,9 +150,9 @@ Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險�
 
 1. 先比較 `z_index`。
 2. z-index 相同時，使用穩定的 Scene/family drawing order。
-3. 若可能遮擋的 opaque/stroked object 會畫在文字上方，預設產生 `text-occlusion WARNING`；若兩者明確屬於同一 graph root，改為 best-effort `INFO`。
+3. 若可能遮擋的 opaque/stroked object 會畫在文字上方，無論是否屬於同一 graph root，都產生 `text-occlusion WARNING`。
 
-文字畫在自己的 background panel 上方可通過；透明且不描邊的物件不造成 false warning。Graph 內文字遮擋仍保留 finding，但不阻塞；graph 對外部文字或物件仍是嚴格 warning。
+文字畫在自己的 background panel 上方可通過；透明且不描邊的物件不造成 false warning。Graph 內文字遮擋同樣會阻塞，不再降為 INFO。
 
 ## 必要 checkpoint 與命令
 

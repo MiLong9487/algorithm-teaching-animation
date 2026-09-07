@@ -209,7 +209,7 @@ Overlays 關閉時不預留只供 overlay 使用的空間；啟用時放在 layo
 - 規劃 node labels、frontier、pointer/highlight 同時出現的 peak state；helper 共址不得遮住 node label。
 - 只有 traversal order 是教學重點時才加入 neighbor-order cues。
 - 把完整 graph 放在顯示期間 identity 穩定的 `VGroup` wrapper，並在第一次可能觸發 visible audit 的 `play()` 前呼叫 `register_graph_root(wrapper, optional_name)`。不要把一般 card、panel 或 table 註冊成 graph。Graph 完整退場時，已註冊 root 會成為 inactive，不需取消註冊。
-- 目前 Scene 中同一已註冊 wrapper 內的 graph/graph 排版通常採 `INFO` best-effort；line crossings 以 segment narrow phase 減少雜訊，但實際 Circle node/node overlap 使用圓形 narrow phase 並維持 blocking `WARNING`。不同 graph、graph 對非 graph 與未知 pair 維持嚴格。若 replacement 使用新 wrapper，在它第一次接受 audit 前註冊新 root；舊 root 缺席不會報錯。
+- 目前 Scene 中同一已註冊 wrapper 內的 graph/graph 排版通常採 `INFO` best-effort；line crossings 以 segment narrow phase 減少雜訊。常見封閉 node 外形會先排除完整 containment，再把實際 node/node overlap 維持為 blocking `WARNING`；Circle/Circle 使用圓形 narrow phase。圖中文字被上層可見物件遮擋也維持 blocking `WARNING`。不同 graph、graph 對非 graph 與未知 pair 維持嚴格。若 replacement 使用新 wrapper，在它第一次接受 audit 前註冊新 root；舊 root 缺席不會報錯。
 
 ## 寫完 Python 後：強制靜態 Audit
 

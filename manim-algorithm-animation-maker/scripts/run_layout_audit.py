@@ -202,6 +202,7 @@ REQUIRED_EXCEPTION_FIELDS = {
 }
 NON_WAIVABLE_RELATIONS = {
     "ambiguous-graph-membership",
+    "ambiguous-structural-parent",
     "exception-error",
     "frame-overflow-bottom",
     "frame-overflow-left",

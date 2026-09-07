@@ -55,7 +55,7 @@ Preflight 失敗時仍建立 `layout_audit_result.md` 並寫入 `Result: FAIL`�
 7. Writer 修正後可重跑受影響 Scene 作迭代，但 final gate 必須重新完整執行五幕。
 8. Final run 前，Scene Reviewer 必須已對最終 source 寫 `Result: PASS`，且 `Final Reviewed Code SHA-256` 與受檢 source 完全一致。Final run 只套用 Reviewer 明確批准且 hash 相符的 exceptions。
 
-泛用 visible audit 是權威 gate：`unresolved warning count > 0 => FAIL`。同 graph line/line 等 best-effort findings 保留為 `INFO`；同 graph 的實際 Circle node/node overlap 為 blocking `WARNING`。不同 graph、graph 對 non-graph、internal/cross-container spill、unexpected containment、文字遮擋、畫面越界、adapter failure、缺少 checkpoint 或 hash 不一致仍會阻塞。
+泛用 visible audit 是權威 gate：`unresolved warning count > 0 => FAIL`。同 graph line/line 等 best-effort findings 保留為 `INFO`；常見封閉 node 外形會先排除完整 containment，同 graph 的實際 node/node overlap 為 blocking `WARNING`，Circle/Circle 使用圓形 narrow phase；同 graph 文字遮擋也一律為 blocking `WARNING`。不同 graph、graph 對 non-graph、internal/cross-container spill、unexpected containment、畫面越界、adapter failure、缺少 checkpoint 或 hash 不一致仍會阻塞。
 
 ## Completion criteria
 
