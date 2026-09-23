@@ -107,7 +107,7 @@ Scene 1–3 完成後，先決定動畫要講哪些複雜度內容。主要 Agen
 只有原本的 `scene_writer` 回報 `DONE`，且兩個 Writer Expected outputs `generated_algo_scene.py` 與 `scene_layout_audit.py` 都存在時，`CODE_PREPARATION` gate 才能通過。若回報 `BLOCKED` 或輸出不完整，留在 `CODE_PREPARATION`，使用 `followup_task` 將具體缺口交回原本的 `scene_writer`。
 
 Writer 必須依 `references/layout-audit.md` 建立 checkpoint adapter、明確註冊真正的 graph wrapper，且不得忽略、隱藏或降級泛用掃描產生的 warning。
-可見 leaf 或 subgroup 在 checkpoint 只能有一個直接 structural owner；邏輯分類使用 Python collection，不得用同時掛入 Scene 的共享 `VGroup` 製造多 parent。Graph 內文字若被上層可見物件遮擋也必須回報 blocking `WARNING`。
+可見 leaf 或 subgroup 可有多個 Scene-visible parents；泛用 audit 按物件身分去重、依全部可見路徑保守判定 containment 與 graph routing。未接入 Scene 的暫時 group 不算 parent。文字字形與可遮擋幾何相交時，其 z-index 必須嚴格高於對方，否則為 blocking `WARNING`。Scene 角色不得自行檢查或修改 auditor；遇到疑似工具失真應回報 Coordinator，由工具維護測試處理，不以高風險動畫重構硬消警告。
 
 ### 子階段 2：PRE-LAYOUT CONTRACT REVIEW
 CODE_PREPARATION gate 通過後，先依 `scene_reviewer` Dispatch Profile 初次派遣 reviewer。此時不要求 layout result；reviewer 必須完整檢查教學流程／演算法是否充分、state、beat、lifecycle、cleanup，以及每個 registered graph root 是否真為 graph 且未混入 panel、table、card、matrix、整幕或其他無關 UI。

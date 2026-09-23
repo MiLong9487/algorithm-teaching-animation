@@ -10,6 +10,7 @@
 - 不省略 Scene，不自行豁免、忽略、摘要改寫或降級 raw findings。
 - Raw JSON 與 runner gate result 永遠是權威；summary/triage 只供導航與節省 context。
 - 不要求 Scene Writer 執行 runner或讀取完整 raw JSON。
+- 只執行 runner 並整理輸出；不得自行檢查或修改 auditor 的內部實作。疑似 runner 與實際播放不一致時，保留重現證據並回報 Coordinator。
 
 ## Required inputs
 

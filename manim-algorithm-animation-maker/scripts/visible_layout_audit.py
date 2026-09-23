@@ -139,17 +139,27 @@ class _CheckpointAudit:
         self.graph_root_ids = {id(root) for root, _name in self.graph_roots}
         self.bounds_cache: dict[int, Bounds] = {}
         self.segment_cache: dict[int, tuple[tuple[float, float], tuple[float, float]] | None] = {}
+        self.text_drawables_cache: dict[int, list[tuple[Bounds, float]]] = {}
+        self.occluder_drawables_cache: dict[int, list[tuple[object, Bounds, float]]] = {}
         self.membership_index: dict[int, list[tuple[object, str | None]]] = {}
-        self.direct_parent_index: dict[int, dict[int | None, str]] = {}
-        self.object_path_index: dict[int, str] = {}
+        self.graph_contexts: dict[int, set[frozenset[int]]] = {}
+        self.ancestry_index: dict[int, set[tuple[object, ...]]] = {}
+        self.last_order_index: dict[int, int] = {}
+        self.index_order = 0
+        self.cycle_paths: set[str] = set()
+        self.compared_pairs: set[tuple[int, int]] = set()
         self.seen: set[int] = set()
-        self.drawing_order = 0
         self.findings: list[VisibleFinding] = []
         self.narrow_phase_checks = 0
 
     def run(self) -> VisibleAuditResult:
         for index, mobject in enumerate(self.scene.mobjects):
             self._index_memberships(mobject, f"{type(mobject).__name__}[{index}]", (), set())
+
+        if self.cycle_paths:
+            for path in sorted(self.cycle_paths):
+                self._add("ERROR", "structural-cycle", (path,), f"{path}: cyclic Scene-visible structure", waivable=False)
+            return VisibleAuditResult(self.context, self.findings)
 
         roots: list[HierarchyNode] = []
         for index, mobject in enumerate(self.scene.mobjects):
@@ -159,24 +169,9 @@ class _CheckpointAudit:
 
         leaves = list(self._iter_leaves(roots))
         self._audit_frame(leaves)
-        visible_structure_ids = {
-            id(mobject)
-            for leaf in leaves
-            for mobject in (leaf.mobject, *leaf.structural_ancestors)
-        }
-        for object_id, parents in self.direct_parent_index.items():
-            if object_id in visible_structure_ids and len(parents) > 1:
-                name = self.object_path_index[object_id]
-                self._add(
-                    "ERROR",
-                    "ambiguous-structural-parent",
-                    (name,),
-                    f"{name}: is reachable through multiple direct structural owners "
-                    f"({', '.join(parents.values())})",
-                    waivable=False,
-                )
         for leaf in leaves:
-            if len(leaf.graph_roots) > 1:
+            contexts = self.graph_contexts.get(id(leaf.mobject), {frozenset()})
+            if len({graph_id for context in contexts for graph_id in context}) > 1:
                 names = [name or type(root).__name__ for root, name in leaf.graph_roots]
                 self._add(
                     "ERROR",
@@ -184,6 +179,13 @@ class _CheckpointAudit:
                     (leaf.name,),
                     f"{leaf.name}: belongs to multiple registered graph roots ({', '.join(names)})",
                     waivable=False,
+                )
+            elif len(contexts) > 1:
+                self._add(
+                    "WARNING",
+                    "ambiguous-graph-routing",
+                    (leaf.name,),
+                    f"{leaf.name}: is reachable through both graph and non-graph paths",
                 )
 
         for root in roots:
@@ -225,17 +227,20 @@ class _CheckpointAudit:
         """
         object_id = id(mobject)
         if object_id in active_path:
+            self.cycle_paths.add(path)
             return
-
-        parent = structural_ancestors[-1] if structural_ancestors else None
-        parent_id = id(parent) if parent is not None else None
-        parent_name = self.object_path_index.get(parent_id, "<scene>") if parent is not None else "<scene>"
-        self.direct_parent_index.setdefault(object_id, {}).setdefault(parent_id, parent_name)
-        self.object_path_index.setdefault(object_id, path)
 
         children = list(getattr(mobject, "submobjects", []) or [])
         is_container = bool(class_names(mobject) & CONTAINER_TYPE_NAMES) or object_id in self.graph_root_ids
         if not is_container:
+            self.ancestry_index.setdefault(object_id, set()).add(structural_ancestors)
+            self.last_order_index[object_id] = self.index_order
+            self.index_order += 1
+            context = frozenset(
+                id(root) for root, _name in self.graph_roots
+                if root is mobject or any(root is ancestor for ancestor in structural_ancestors)
+            )
+            self.graph_contexts.setdefault(object_id, set()).add(context)
             indexed = self.membership_index.setdefault(object_id, [])
             for registration in self.graph_roots:
                 if registration[0] is mobject or any(
@@ -277,9 +282,8 @@ class _CheckpointAudit:
                 bounds=self._bounds(mobject),
                 structural_ancestors=structural_ancestors,
                 graph_roots=tuple(self.membership_index.get(object_id, ())),
-                drawing_order=self.drawing_order,
+                drawing_order=self.last_order_index.get(object_id, 0),
             )
-            self.drawing_order += 1
             return HierarchyNode(path, mobject, item.bounds, item=item)
 
         next_ancestors = structural_ancestors + (mobject,)
@@ -346,6 +350,12 @@ class _CheckpointAudit:
             self._compare_branches(first, child)
 
     def _audit_leaf_pair(self, first: VisibleItem, second: VisibleItem) -> None:
+        if first.mobject is second.mobject:
+            return
+        pair = tuple(sorted((id(first.mobject), id(second.mobject))))
+        if pair in self.compared_pairs:
+            return
+        self.compared_pairs.add(pair)
         same_graph = self._same_unambiguous_graph(first, second)
         finding_severity = "INFO" if same_graph is not None else "WARNING"
         if same_graph is not None and is_line_like(first.mobject) and is_line_like(second.mobject):
@@ -356,9 +366,13 @@ class _CheckpointAudit:
             self._audit_strict_pair(first, second, finding_severity=finding_severity)
         self._audit_text_occlusion(first, second, finding_severity="WARNING")
 
-    @staticmethod
-    def _same_unambiguous_graph(first: VisibleItem, second: VisibleItem) -> tuple[object, str | None] | None:
+    def _same_unambiguous_graph(self, first: VisibleItem, second: VisibleItem) -> tuple[object, str | None] | None:
         if len(first.graph_roots) != 1 or len(second.graph_roots) != 1:
+            return None
+        first_contexts = self.graph_contexts.get(id(first.mobject), set())
+        second_contexts = self.graph_contexts.get(id(second.mobject), set())
+        expected = {frozenset({id(first.graph_roots[0][0])})}
+        if first_contexts != expected or second_contexts != expected:
             return None
         if first.graph_roots[0][0] is second.graph_roots[0][0]:
             return first.graph_roots[0]
@@ -405,7 +419,7 @@ class _CheckpointAudit:
     ) -> None:
         relation = classify_pair(first.bounds, second.bounds, self.containment_padding, self.overlap_epsilon)
         if relation in {"first-inside-second", "second-inside-first"}:
-            if same_structural_parent(first, second):
+            if self._all_same_structural_parent(first, second):
                 return
             self._audit_strict_pair(first, second, finding_severity="WARNING")
             return
@@ -486,7 +500,7 @@ class _CheckpointAudit:
             return
 
         inner, outer = (first, second) if relation == "first-inside-second" else (second, first)
-        if is_owned_containment(inner, outer, self.graph_root_ids):
+        if self._all_owned_containment(inner, outer):
             return
         else:
             self._add(
@@ -495,6 +509,21 @@ class _CheckpointAudit:
                 (inner.name, outer.name),
                 f"{inner.name}: is unexpectedly contained by {outer.name} ({inner.bounds.format()}; {outer.bounds.format()})",
             )
+
+    def _all_same_structural_parent(self, first: VisibleItem, second: VisibleItem) -> bool:
+        first_paths = self.ancestry_index[id(first.mobject)]
+        second_paths = self.ancestry_index[id(second.mobject)]
+        return all(
+            first_path and second_path and first_path[-1] is second_path[-1]
+            for first_path in first_paths for second_path in second_paths
+        )
+
+    def _all_owned_containment(self, inner: VisibleItem, outer: VisibleItem) -> bool:
+        return all(
+            is_owned_containment(inner, outer, self.graph_root_ids, inner_path, outer_path)
+            for inner_path in self.ancestry_index[id(inner.mobject)]
+            for outer_path in self.ancestry_index[id(outer.mobject)]
+        )
 
     def _audit_text_occlusion(
         self,
@@ -508,16 +537,22 @@ class _CheckpointAudit:
         if first_text == second_text:
             return
         text_item, other = (first, second) if first_text else (second, first)
-        if not is_occluding(other.mobject):
-            return
-        if rendered_above(text_item, other):
-            return
-        self._add(
-            finding_severity,
-            "text-occlusion",
-            (text_item.name, other.name),
-            f"{text_item.name}: is rendered below overlapping {other.name}",
-        )
+        key = id(text_item.mobject)
+        if key not in self.text_drawables_cache:
+            self.text_drawables_cache[key] = text_drawables(text_item.mobject)
+        other_key = id(other.mobject)
+        if other_key not in self.occluder_drawables_cache:
+            self.occluder_drawables_cache[other_key] = occluder_drawables(other.mobject)
+        for glyph_bounds, glyph_z in self.text_drawables_cache[key]:
+            for blocker, blocker_bounds, blocker_z in self.occluder_drawables_cache[other_key]:
+                if glyph_z <= blocker_z and occludes_bounds(blocker, blocker_bounds, glyph_bounds, self.overlap_epsilon):
+                    self._add(
+                        finding_severity,
+                        "text-occlusion",
+                        (text_item.name, other.name),
+                        f"{text_item.name}: overlapping glyph z-index must exceed {other.name} ({glyph_z:g} <= {blocker_z:g})",
+                    )
+                    return
 
     def _add(
         self,
@@ -556,6 +591,8 @@ def collect_visible_items(mobjects: Iterable[object], include_descendants: bool 
     del include_descendants
     scene = type("SceneLike", (), {"mobjects": list(mobjects)})()
     auditor = _CheckpointAudit(scene, "collect", 0.0, 1e-3, EPSILON, [])
+    for index, mob in enumerate(scene.mobjects):
+        auditor._index_memberships(mob, f"{type(mob).__name__}[{index}]", (), set())
     hierarchy = [
         node
         for index, mob in enumerate(scene.mobjects)
@@ -571,7 +608,7 @@ def is_visible_mobject(mobject, bounds_getter=None) -> bool:
         return False
     if bounds.width <= EPSILON and bounds.height <= EPSILON:
         return False
-    return is_occluding(mobject)
+    return any(is_occluding(member) for member in drawable_members(mobject))
 
 
 def get_bounds(mobject) -> Bounds:
@@ -612,33 +649,33 @@ def is_strictly_inside(inner: Bounds, outer: Bounds, padding: float) -> bool:
     )
 
 
-def is_owned_containment(inner: VisibleItem, outer: VisibleItem, graph_root_ids: set[int]) -> bool:
+def is_owned_containment(
+    inner: VisibleItem,
+    outer: VisibleItem,
+    graph_root_ids: set[int],
+    inner_ancestors: tuple[object, ...] | None = None,
+    outer_ancestors: tuple[object, ...] | None = None,
+) -> bool:
     if not is_visual_boundary(outer.mobject):
         return False
+    inner_ancestors = inner.structural_ancestors if inner_ancestors is None else inner_ancestors
+    outer_ancestors = outer.structural_ancestors if outer_ancestors is None else outer_ancestors
     common = [
         ancestor
-        for ancestor in inner.structural_ancestors
-        if any(ancestor is candidate for candidate in outer.structural_ancestors)
+        for ancestor in inner_ancestors
+        if any(ancestor is candidate for candidate in outer_ancestors)
     ]
     if not common or id(common[-1]) in graph_root_ids or not rendered_above(inner, outer):
         return False
 
     owner = common[-1]
-    inner_below_owner = _ancestors_below(inner.structural_ancestors, owner)
-    outer_below_owner = _ancestors_below(outer.structural_ancestors, owner)
+    inner_below_owner = _ancestors_below(inner_ancestors, owner)
+    outer_below_owner = _ancestors_below(outer_ancestors, owner)
     # Two distinct structural branches are peer containers, even when an
     # umbrella VGroup makes them share a higher ancestor.  Containment across
     # those branches must remain strict.  One nested content branch is allowed
     # so an expected boundary/content containment can be ignored.
     return not (inner_below_owner and outer_below_owner)
-
-
-def same_structural_parent(first: VisibleItem, second: VisibleItem) -> bool:
-    return bool(
-        first.structural_ancestors
-        and second.structural_ancestors
-        and first.structural_ancestors[-1] is second.structural_ancestors[-1]
-    )
 
 
 def _ancestors_below(ancestors: tuple[object, ...], owner: object) -> tuple[object, ...]:
@@ -689,7 +726,83 @@ def is_visual_boundary(mobject) -> bool:
 def rendered_above(text: VisibleItem, other: VisibleItem) -> bool:
     text_z = float(getattr(text.mobject, "z_index", 0.0))
     other_z = float(getattr(other.mobject, "z_index", 0.0))
+    if is_text_like(text.mobject):
+        return all(z > other_z for _bounds, z in text_drawables(text.mobject))
     return text_z > other_z or (text_z == other_z and text.drawing_order > other.drawing_order)
+
+
+def text_drawables(mobject) -> list[tuple[Bounds, float]]:
+    result = []
+    for member in drawable_members(mobject):
+        if is_occluding(member):
+            result.append((get_bounds(member), float(getattr(member, "z_index", 0.0))))
+    return result
+
+
+def drawable_members(mobject) -> list[object]:
+    family_with_points = getattr(mobject, "family_members_with_points", None)
+    members = list(family_with_points()) if callable(family_with_points) else [mobject]
+    return list(dict.fromkeys(members))
+
+
+def occluder_drawables(mobject) -> list[tuple[object, Bounds, float]]:
+    return [
+        (member, get_bounds(member), float(getattr(member, "z_index", 0.0)))
+        for member in drawable_members(mobject) if is_occluding(member)
+    ]
+
+
+def occludes_bounds(mobject, outer: Bounds, glyph: Bounds, epsilon: float) -> bool:
+    if not aabb_intersects(outer, glyph, epsilon):
+        return False
+    if max_opacity(call_zero_arg(mobject, "get_fill_opacity", 0.0)) > EPSILON:
+        return (
+            min(outer.right, glyph.right) - max(outer.left, glyph.left) > epsilon
+            and min(outer.top, glyph.top) - max(outer.bottom, glyph.bottom) > epsilon
+        )
+    if max_opacity(call_zero_arg(mobject, "get_stroke_opacity", 0.0)) <= EPSILON:
+        return False
+    if is_line_like(mobject):
+        segment = line_segment(mobject)
+        return segment is None or segment_intersects_bounds(segment, glyph, epsilon)
+    names = class_names(mobject)
+    if names & {"Rectangle", "Square", "RoundedRectangle"}:
+        return not is_strictly_inside(glyph, outer, epsilon)
+    if names & {"Circle", "Ellipse"}:
+        cx = (outer.left + outer.right) / 2
+        cy = (outer.bottom + outer.top) / 2
+        rx = outer.width / 2 - epsilon
+        ry = outer.height / 2 - epsilon
+        if rx > 0 and ry > 0 and all(
+            ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 < 1
+            for x in (glyph.left, glyph.right) for y in (glyph.bottom, glyph.top)
+        ):
+            return False
+    return True
+
+
+def segment_intersects_bounds(segment, bounds: Bounds, epsilon: float) -> bool:
+    (x1, y1), (x2, y2) = segment
+    dx, dy = x2 - x1, y2 - y1
+    enter, leave = 0.0, 1.0
+    for p, q in (
+        (-dx, x1 - bounds.left + epsilon),
+        (dx, bounds.right - x1 + epsilon),
+        (-dy, y1 - bounds.bottom + epsilon),
+        (dy, bounds.top - y1 + epsilon),
+    ):
+        if abs(p) <= EPSILON:
+            if q < 0:
+                return False
+        else:
+            ratio = q / p
+            if p < 0:
+                enter = max(enter, ratio)
+            else:
+                leave = min(leave, ratio)
+            if enter > leave:
+                return False
+    return True
 
 
 def line_segment(mobject) -> tuple[tuple[float, float], tuple[float, float]] | None:

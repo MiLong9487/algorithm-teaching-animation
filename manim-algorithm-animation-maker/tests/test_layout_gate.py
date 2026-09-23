@@ -105,6 +105,16 @@ class Text(FakeMobject):
     pass
 
 
+class TextWithGlyph(Text):
+    def family_members_with_points(self):
+        return self.submobjects
+
+
+class DrawableFamily(FakeMobject):
+    def family_members_with_points(self):
+        return self.submobjects
+
+
 class Dot(FakeMobject):
     pass
 
@@ -198,7 +208,7 @@ class LayoutGateTests(unittest.TestCase):
     def graph_node(position, *, half_extent=0.28):
         x, y = position
         shape = Circle((x - half_extent, x + half_extent, y - half_extent, y + half_extent))
-        label = Text((x - 0.11, x + 0.11, y - 0.11, y + 0.11))
+        label = Text((x - 0.11, x + 0.11, y - 0.11, y + 0.11), z_index=2.0)
         return VGroup(shape, label)
 
     @staticmethod
@@ -271,7 +281,7 @@ class LayoutGateTests(unittest.TestCase):
 
     def test_proper_text_containment_has_no_finding(self) -> None:
         panel = Rectangle((-2.0, 2.0, -1.0, 1.0))
-        label = Text((-1.0, 1.0, -0.4, 0.4))
+        label = Text((-1.0, 1.0, -0.4, 0.4), z_index=1.0)
         result = self.audit(VGroup(panel, label))
         self.assertEqual(result.findings, [])
 
@@ -413,7 +423,7 @@ class LayoutGateTests(unittest.TestCase):
 
     def test_same_graph_line_versus_text_is_best_effort(self) -> None:
         edge = Line((-1.0, -1.0), (1.0, 1.0))
-        label = Text((-0.3, 0.3, -0.3, 0.3))
+        label = Text((-0.3, 0.3, -0.3, 0.3), z_index=1.0)
         root = VGroup(edge, label)
         result = self.audit(root, graph_roots=[(root, "g")])
         self.assertEqual(result.warnings, [])
@@ -511,7 +521,7 @@ class LayoutGateTests(unittest.TestCase):
 
     def test_independent_peer_containment_warns(self) -> None:
         panel = Rectangle((-2.0, 2.0, -1.0, 1.0))
-        content = Text((-1.0, 1.0, -0.4, 0.4))
+        content = Text((-1.0, 1.0, -0.4, 0.4), z_index=1.0)
         result = self.audit(panel, content)
         self.assertIn("unexpected-containment", self.relations(result, "WARNING"))
 
@@ -529,7 +539,7 @@ class LayoutGateTests(unittest.TestCase):
 
     def test_legitimate_nested_containment_does_not_warn(self) -> None:
         panel = Rectangle((-2.0, 2.0, -1.0, 1.0))
-        content = Text((-1.0, 1.0, -0.4, 0.4))
+        content = Text((-1.0, 1.0, -0.4, 0.4), z_index=1.0)
         result = self.audit(VGroup(panel, VGroup(content)))
         self.assertEqual(result.findings, [])
 
@@ -547,9 +557,41 @@ class LayoutGateTests(unittest.TestCase):
 
     def test_text_above_own_background_passes(self) -> None:
         panel = Rectangle((-2.0, 2.0, -1.0, 1.0))
-        text = Text((-1.0, 1.0, -0.4, 0.4))
+        text = Text((-1.0, 1.0, -0.4, 0.4), z_index=1.0)
         result = self.audit(VGroup(panel, text))
         self.assertNotIn("text-occlusion", self.relations(result, "WARNING"))
+
+    def test_equal_z_index_warns_even_when_text_is_later(self) -> None:
+        panel = Rectangle((-2.0, 2.0, -1.0, 1.0))
+        text = Text((-1.0, 1.0, -0.4, 0.4))
+        result = self.audit(VGroup(panel, text))
+        self.assertIn("text-occlusion", self.relations(result, "WARNING"))
+
+    def test_text_uses_drawable_glyph_z_index_not_wrapper_z_index(self) -> None:
+        glyph = FakeMobject((-0.3, 0.3, -0.2, 0.2), z_index=0.0)
+        text = TextWithGlyph((-0.3, 0.3, -0.2, 0.2), z_index=3.0, children=[glyph])
+        panel = Rectangle((-1.0, 1.0, -1.0, 1.0), z_index=1.0)
+        result = self.audit(VGroup(panel, text))
+        self.assertIn("text-occlusion", self.relations(result, "WARNING"))
+
+    def test_drawable_child_occludes_even_if_wrapper_is_transparent(self) -> None:
+        text = Text((-0.3, 0.3, -0.2, 0.2))
+        child = Rectangle((-1.0, 1.0, -1.0, 1.0), z_index=1.0)
+        wrapper = DrawableFamily((-1.0, 1.0, -1.0, 1.0), fill=0.0, stroke=0.0, children=[child])
+        result = self.audit(VGroup(text, wrapper))
+        self.assertIn("text-occlusion", self.relations(result, "WARNING"))
+
+    def test_text_inside_stroke_only_outline_is_not_occluded(self) -> None:
+        outline = Rectangle((-2.0, 2.0, -1.0, 1.0), fill=0.0)
+        text = Text((-1.0, 1.0, -0.4, 0.4))
+        result = self.audit(VGroup(outline, text))
+        self.assertNotIn("text-occlusion", self.relations(result))
+
+    def test_line_aabb_near_text_does_not_trigger_occlusion(self) -> None:
+        line = Line((-1.0, -1.0), (1.0, 1.0))
+        text = Text((-0.9, -0.7, 0.7, 0.9))
+        result = self.audit(VGroup(line, text))
+        self.assertNotIn("text-occlusion", self.relations(result))
 
     def test_transparent_object_does_not_occlude_text(self) -> None:
         text = Text((-1.0, 1.0, -0.4, 0.4))
@@ -598,25 +640,54 @@ class LayoutGateTests(unittest.TestCase):
             graph_roots=[(first_root, "first"), (second_root, "second")],
         )
         self.assertIn("ambiguous-graph-membership", self.relations(result, "ERROR"))
-        self.assertIn("ambiguous-structural-parent", self.relations(result, "ERROR"))
+        self.assertNotIn("ambiguous-structural-parent", self.relations(result))
 
-    def test_shared_leaf_in_peer_non_graph_groups_has_ambiguous_parent(self) -> None:
+    def test_shared_leaf_in_peer_non_graph_groups_is_allowed(self) -> None:
         shared = Circle((-0.5, 0.5, -0.5, 0.5))
         result = self.audit(VGroup(shared), VGroup(shared))
-        finding = next(
-            finding for finding in result.findings if finding.relation == "ambiguous-structural-parent"
-        )
-        self.assertEqual(finding.severity, "ERROR")
-        self.assertFalse(finding.waivable)
+        self.assertEqual(result.findings, [])
 
-    def test_shared_subgroup_has_ambiguous_parent(self) -> None:
+    def test_shared_subgroup_is_allowed(self) -> None:
         shared = VGroup(Circle((-0.5, 0.5, -0.5, 0.5)))
         result = self.audit(VGroup(shared), VGroup(shared))
-        self.assertIn("ambiguous-structural-parent", self.relations(result, "ERROR"))
+        self.assertEqual(result.findings, [])
 
-    def test_nested_single_owner_structure_is_not_ambiguous(self) -> None:
+    def test_nested_single_owner_structure_is_valid(self) -> None:
         result = self.audit(VGroup(VGroup(Circle((-0.5, 0.5, -0.5, 0.5)))))
-        self.assertNotIn("ambiguous-structural-parent", self.relations(result))
+        self.assertEqual(result.findings, [])
+
+    def test_shared_leaf_pair_is_checked_once(self) -> None:
+        shared = Rectangle((-1.0, 1.0, -1.0, 1.0))
+        other = Rectangle((0.0, 2.0, 0.0, 2.0))
+        result = self.audit(VGroup(shared), VGroup(shared, other))
+        self.assertEqual(self.relations(result, "WARNING"), ["overlap"])
+
+    def test_shared_parent_cannot_hide_cross_container_containment(self) -> None:
+        outer = Rectangle((-2.0, 2.0, -2.0, 2.0))
+        inner = Rectangle((-0.5, 0.5, -0.5, 0.5), z_index=1.0)
+        shared = VGroup(outer, inner)
+        result = self.audit(shared, VGroup(inner))
+        self.assertIn("unexpected-containment", self.relations(result, "WARNING"))
+
+    def test_graph_and_non_graph_paths_use_strict_routing(self) -> None:
+        first = Line((-1.0, -1.0), (1.0, 1.0))
+        second = Line((-1.0, 1.0), (1.0, -1.0))
+        graph = VGroup(first, second)
+        result = self.audit(graph, first, graph_roots=[(graph, "g")])
+        self.assertIn("ambiguous-graph-routing", self.relations(result, "WARNING"))
+        self.assertIn("overlap", self.relations(result, "WARNING"))
+
+    def test_detached_group_does_not_add_parent_path(self) -> None:
+        shared = Circle((-0.5, 0.5, -0.5, 0.5))
+        _detached = VGroup(shared)
+        result = self.audit(shared)
+        self.assertEqual(result.findings, [])
+
+    def test_structural_cycle_is_reported_without_expanding_bounds(self) -> None:
+        group = VGroup()
+        group.submobjects.append(group)
+        result = self.audit(group)
+        self.assertIn("structural-cycle", self.relations(result, "ERROR"))
 
     def test_frame_overflow_is_non_waivable(self) -> None:
         result = self.audit(Rectangle((-11.0, -9.0, -0.5, 0.5)))

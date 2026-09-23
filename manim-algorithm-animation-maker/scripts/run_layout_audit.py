@@ -202,7 +202,7 @@ REQUIRED_EXCEPTION_FIELDS = {
 }
 NON_WAIVABLE_RELATIONS = {
     "ambiguous-graph-membership",
-    "ambiguous-structural-parent",
+    "structural-cycle",
     "exception-error",
     "frame-overflow-bottom",
     "frame-overflow-left",
@@ -500,36 +500,16 @@ def find_scene_class(module: ModuleType, requested_name: str | None):
     return scene_classes[0]
 
 
-def flatten_animations(animation):
-    children = getattr(animation, "animations", None)
-    if children:
-        for child in children:
-            yield from flatten_animations(child)
-    else:
-        yield animation
-
-
-def finish_animation(scene, animation) -> None:
-    from manim import Animation
-
-    if not isinstance(animation, Animation):
-        raise TypeError(f"Scene.play expected Animation instances; got {type(animation).__name__}")
-
-    mobject = getattr(animation, "mobject", None)
-    if mobject is not None:
-        scene.add(mobject)
-
-    animation.begin()
-    animation.interpolate(1)
-    animation.finish()
-    animation.clean_up_from_scene(scene)
-
-
 def dry_play(scene, *animations, **kwargs):
     animations = scene.compile_animations(*animations, **kwargs)
+    scene.add_mobjects_from_animations(animations)
     for animation in animations:
-        for child in flatten_animations(animation):
-            finish_animation(scene, child)
+        animation._setup_scene(scene)
+        animation.begin()
+    for animation in animations:
+        animation.interpolate(1)
+        animation.finish()
+        animation.clean_up_from_scene(scene)
     if ACTIVE_VISIBLE_AUDITOR is not None:
         ACTIVE_VISIBLE_AUDITOR.after_play(scene)
     return scene

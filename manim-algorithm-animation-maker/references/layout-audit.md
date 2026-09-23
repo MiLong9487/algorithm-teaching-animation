@@ -91,7 +91,7 @@ register_graph_root(graph, "main traversal graph")  # name 只供 log 閱讀
 self.play(FadeIn(graph))
 ```
 
-Membership 完全由目前 Scene 中的 wrapper ancestry 與 object identity 推導，不使用額外 graph ID。若同一 leaf 同時屬於多個已註冊 graph roots，audit 以不可豁免 `ERROR` 失敗。已註冊 root 在某個 checkpoint 不在 Scene 時視為 inactive，不產生 finding；之後重新出現時自動恢復 graph 規則。若 root 消失但部分 children 獨立留在 Scene，這些 children 不再具有該 root membership，會回到嚴格規則。Replacement 可註冊新 wrapper；不需要取消舊 root。
+Membership 完全由目前 Scene 可到達的 wrapper ancestry 與 object identity 推導，不使用額外 graph ID。未接入 Scene 的暫時 group 不算 parent。若同一 leaf 同時屬於多個不同的已註冊 graph roots，audit 以不可豁免 `ERROR` 失敗；若兼有 graph 與 non-graph 可見路徑，回報 `ambiguous-graph-routing WARNING` 並採嚴格規則。已註冊 root 在某個 checkpoint 不在 Scene 時視為 inactive，不產生 finding；之後重新出現時自動恢復 graph 規則。若 root 消失但部分 children 獨立留在 Scene，這些 children 不再具有該 root membership，會回到嚴格規則。Replacement 可註冊新 wrapper；不需要取消舊 root。
 
 ## 階層式 broad-to-narrow 規則
 
@@ -101,7 +101,7 @@ Membership 完全由目前 Scene 中的 wrapper ancestry 與 object identity 推
 2. 兩個 container AABB 分離時停止；相交或互相包含時，只遞迴比較相交的 child branches。
 3. Container 對 leaf 只下降可能相交的 branch。
 4. 每個 container 也必須獨立執行 internal sibling/descendant audit，即使它與任何外部 container 都沒有碰撞。
-5. 到達可見 leaf 才套用 pair rule；順序依 Scene/family 順序固定，確保 findings 可重現。
+5. 到達可見 leaf 才套用 pair rule；同一物件不與自己比，同一物件 pair 只檢查一次。多 parent 的所有可見路徑都參與分類，不能以第一次遇到的路徑取得寬鬆待遇。
 
 Internal path 必須捕捉 card 內的 sibling 關係。例如 heading 與 panel 同屬一個 card，而 heading 的 bounds 延伸到 panel 外，即使 card 沒撞到外部物件，仍要產生 `WARNING`。
 
@@ -109,7 +109,7 @@ Internal path 必須捕捉 card 內的 sibling 關係。例如 heading 與 panel
 
 ## Graph 與非 graph routing
 
-所有 pair 預設使用原本嚴格規則。兩個 leaves 明確且唯一地屬於同一個 registered graph root 時，圖內排版通常採 best-effort；唯一提升為 blocking 的圖內特例是常見封閉 node 外形之間的實際 overlap。
+所有 pair 預設使用原本嚴格規則。只有兩個 leaves 的每條可見路徑都唯一屬於同一個 registered graph root，圖內排版才採 best-effort；唯一提升為 blocking 的圖內特例是常見封閉 node 外形之間的實際 overlap。
 
 - 同 root 的 line/node、line/text 與一般 containment：幾何 relation 保留為 `INFO`；但若文字實際畫在遮擋物下方，會另外產生 blocking `text-occlusion WARNING`。
 - 同 root line-like pair：AABB 相交後執行 segment narrow phase，以減少無意義 finding。
@@ -122,7 +122,7 @@ Internal path 必須捕捉 card 內的 sibling 關係。例如 heading 與 panel
 
 Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險低時改善明顯圖內排版，但 validator 不得自行把 INFO 升為 warning。只有 Scene Reviewer 已確認的真正 graph wrapper 可註冊；不得把 panel、table、card、matrix、整個 Scene 或混入無關 UI 的 umbrella group 包成 graph 來規避嚴格 gate。
 
-每個 audit checkpoint 的可見 ownership 結構必須是一棵樹：leaf 或 subgroup 可以有多層巢狀 ancestors，但只能有一個直接 structural owner。同一物件若可由多個平行 Scene-visible branches 到達，產生不可豁免的 `ambiguous-structural-parent ERROR`。需要邏輯分類時使用 Python list/dict/set；暫時操作用的 `VGroup` 不得同時加入 Scene 或註冊成 graph root。`ambiguous-graph-membership ERROR` 仍獨立檢查巢狀或重疊 graph roots。
+可見 ownership 結構可為 DAG；共享 leaf 或 subgroup 本身不報錯。只有從 Scene.mobjects 可到達的 parent 才算可見路徑，幾何按物件身分快取並去重；循環結構為不可豁免 `structural-cycle ERROR`。同組 containment no-finding 必須對兩物件全部可見路徑的組合成立；有跨 container 路徑就回到嚴格規則。`ambiguous-graph-membership ERROR` 仍獨立檢查巢狀或重疊 graph roots。
 
 同 graph line-like narrow phase 只處理 `Line`、`DashedLine`、`Arrow`、`DoubleArrow` 可提供的直線 start/end：
 
@@ -137,8 +137,8 @@ Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險�
 
 ## Containment
 
-- 同一個非 graph structural owner 內，內容或 node label 完全位於自己的可見 panel/node boundary 內，且內容依 drawing order 位於 boundary 上方：正常 containment，不產生 finding。
-- 同一直接 structural parent 下的完整 containment 不產生 finding；同 graph 但位於不同子組或 container 的 node shapes 仍維持 `WARNING`。
+- 同一個非 graph structural owner 內，內容或 node label 完全位於自己的可見 panel/node boundary 內，且內容位於 boundary 上方：正常 containment，不產生 finding；多 parent 時全部可見路徑組合都須符合。
+- 兩物件在每一組可見路徑上都有同一直接 structural parent 時，完整 containment 不產生 finding；同 graph 但位於不同子組或 container 的 node shapes 仍維持 `WARNING`。
 - 獨立 peer containers、不同 containers 的 objects，或其他不具 ownership ancestry 的嚴格 containment：`WARNING`。
 - 合法 ancestor/descendant 或明確 nested owner 不視為獨立 peer。
 - 不相關 opaque object 完全蓋住另一物件仍是 `WARNING`，不能因為「完全包含」而降為 INFO。
@@ -146,13 +146,7 @@ Best-effort 不等於刪除：writer 應在不破壞教學設計且修改風險�
 
 ## 文字 drawing order
 
-不要求所有 `Text` 都有 Scene 全域最高 z-index。只有 precise/fallback geometry 與文字重疊的可見物件才檢查遮擋：
-
-1. 先比較 `z_index`。
-2. z-index 相同時，使用穩定的 Scene/family drawing order。
-3. 若可能遮擋的 opaque/stroked object 會畫在文字上方，無論是否屬於同一 graph root，都產生 `text-occlusion WARNING`。
-
-文字畫在自己的 background panel 上方可通過；透明且不描邊的物件不造成 false warning。Graph 內文字遮擋同樣會阻塞，不再降為 INFO。
+不要求所有 `Text` 都有 Scene 全域最高 z-index。只有字形與實際可能遮擋的填色、框線或線段相交時，才要求有 points 的文字 glyph `z_index` 嚴格大於遮擋物；相等也產生 `text-occlusion WARNING`，不依賴加入順序。文字位於空心外框內且未碰到框線不算遮擋；透明且不描邊的物件也不算。Graph 內文字遮擋同樣阻塞。僅提升 z-index 不能證明透明或缺失的 glyph 已顯示，必要內容另行驗證。
 
 ## 必要 checkpoint 與命令
 

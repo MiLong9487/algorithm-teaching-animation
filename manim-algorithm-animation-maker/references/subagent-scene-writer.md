@@ -42,6 +42,7 @@
 6. 修正程式碼層級可確認的過期 helper、錯誤 state reference、遺漏 cleanup、不一致 assumptions、internal container spill 與文字 drawing-order 風險。對同 graph best-effort INFO，在不破壞教學設計且修改風險低時改善；泛用 visible warning 仍不得忽略、降級或交給 adapter 壓掉。
 
 Validator 回傳 warning 後，Coordinator 只把 `layout_audit_triage.md` 與需處理的 group 交回 Writer，不把完整 JSON 注入 Writer context。Writer 優先修復 layout。只有使用者需求或已核准設計明確要求保留該重疊時，才能在 Coordinator 的 follow-up 指定路徑建立該 Scene 專用、精確且綁定目前 source hash 的 exception proposal；不得自行套用、批准或以一般說明取代精確紀錄。Proposal 必須交由 Scene Reviewer 批准後，Validator 才能使用。
+Writer 不檢查、修改或驗證 audit runner 的內部實作；若 triage 疑似與 Scene 的真實狀態不符，應保留證據並回報 Coordinator，不得為了消除可疑 finding 大幅改寫動畫機制。
 
 在此模式禁止執行任何 Manim render、preview、低畫質渲染或合併影片。
 

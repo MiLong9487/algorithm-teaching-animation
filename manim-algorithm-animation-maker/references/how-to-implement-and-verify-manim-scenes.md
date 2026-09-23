@@ -226,7 +226,7 @@ Overlays 關閉時不預留只供 overlay 使用的空間；啟用時放在 layo
 9. 動態文字替換後，最長內容是否仍在 panel 與 safe frame 內？
 10. 個別合法的 objects 組合後是否可能越界或碰撞？
 11. 每個 card/container 的內部 siblings 是否都在自己的可見 panel/box boundary 內？
-12. 重疊文字是否依 z-index 與 drawing order 位於可能遮擋物件上方？
+12. 與可遮擋幾何相交的文字 glyph，其 z-index 是否嚴格高於對方？
 13. Graph roots 是否只註冊真正的 graph wrapper，且沒有 leaf 同時屬於多個 roots？
 14. Scene 4 的每個必要 derivation phase 是否各有 resolved checkpoint，並維持 Scene 3 的工作單位與視覺語意？
 
