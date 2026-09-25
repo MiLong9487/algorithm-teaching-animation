@@ -501,22 +501,122 @@ def find_scene_class(module: ModuleType, requested_name: str | None):
 
 
 def dry_play(scene, *animations, **kwargs):
-    animations = scene.compile_animations(*animations, **kwargs)
-    scene.add_mobjects_from_animations(animations)
-    for animation in animations:
-        animation._setup_scene(scene)
-        animation.begin()
-    for animation in animations:
-        animation.interpolate(1)
-        animation.finish()
-        animation.clean_up_from_scene(scene)
-    if ACTIVE_VISIBLE_AUDITOR is not None:
+    from manim import config
+
+    scene.compile_animation_data(*animations, **kwargs)
+    renderer = scene.renderer
+    previous_skip_animations = renderer.skip_animations
+    previous_progress_bar = config.progress_bar
+    render_was_overridden = "render" in vars(renderer)
+    previous_render_override = vars(renderer).get("render")
+    start_time = renderer.time
+    completed = False
+
+    try:
+        config.progress_bar = "none"
+        scene.begin_animations()
+        if scene.is_current_animation_frozen_frame():
+            renderer.time = start_time + scene.duration
+        else:
+            framewise = requires_framewise_updates(scene)
+            renderer.skip_animations = not framewise
+            if framewise:
+                # Keep Manim's per-frame state progression and clock, but
+                # replace pixel rendering with a constant-time clock tick.
+                def advance_clock_without_rendering(*_args, **_kwargs):
+                    renderer.time += 1 / config.frame_rate
+
+                renderer.render = advance_clock_without_rendering
+                scene.play_internal(skip_rendering=False)
+            else:
+                renderer.time = start_time + scene.duration
+                scene.play_internal(skip_rendering=True)
+        renderer.num_plays += 1
+        completed = True
+    finally:
+        if render_was_overridden:
+            renderer.render = previous_render_override
+        else:
+            vars(renderer).pop("render", None)
+        renderer.skip_animations = previous_skip_animations
+        config.progress_bar = previous_progress_bar
+
+    if completed and ACTIVE_VISIBLE_AUDITOR is not None:
         ACTIVE_VISIBLE_AUDITOR.after_play(scene)
     return scene
 
 
-def dry_wait(scene, *args, **kwargs):
-    return scene
+def requires_framewise_updates(scene) -> bool:
+    from manim import UpdateFromFunc, Wait
+
+    if scene.always_update_mobjects or scene.updaters:
+        return True
+    if any(
+        getattr(mobject, "updaters", ()) and not getattr(mobject, "updating_suspended", False)
+        for mobject in scene.get_mobject_family_members()
+    ):
+        return True
+    for animation in iter_animation_tree(scene.animations or ()):
+        if isinstance(animation, UpdateFromFunc):
+            return True
+        if isinstance(animation, Wait) and animation.stop_condition is not None:
+            return True
+        get_updated = getattr(animation, "get_all_mobjects_to_update", None)
+        if callable(get_updated):
+            try:
+                updated_mobjects = get_updated()
+            except AttributeError:
+                # Some nested Transform animations finish setup only when
+                # their parent Succession begins that child.
+                continue
+            if any(
+                getattr(mobject, "updaters", ()) and not getattr(mobject, "updating_suspended", False)
+                for mobject in updated_mobjects
+            ):
+                return True
+    return False
+
+
+def iter_animation_tree(animations):
+    stack = list(reversed(tuple(animations)))
+    seen: set[int] = set()
+    while stack:
+        animation = stack.pop()
+        if id(animation) in seen:
+            continue
+        seen.add(id(animation))
+        yield animation
+        children = getattr(animation, "animations", ()) or ()
+        stack.extend(reversed(tuple(children)))
+
+
+def scene_has_active_updaters(scene) -> bool:
+    return bool(
+        scene.always_update_mobjects
+        or scene.updaters
+        or any(getattr(mobject, "updaters", ()) for mobject in scene.get_mobject_family_members())
+    )
+
+
+def dry_wait(scene, duration=1.0, stop_condition=None, frozen_frame=None):
+    duration = scene.validate_run_time(duration, scene.wait, "duration")
+    should_update = frozen_frame is not True and (
+        stop_condition is not None or scene_has_active_updaters(scene)
+    )
+    if not should_update:
+        scene.renderer.time += duration
+        return scene
+
+    from manim import Wait
+
+    return dry_play(
+        scene,
+        Wait(
+            run_time=duration,
+            stop_condition=stop_condition,
+            frozen_frame=frozen_frame,
+        ),
+    )
 
 
 def dry_add_sound(scene, *args, **kwargs):

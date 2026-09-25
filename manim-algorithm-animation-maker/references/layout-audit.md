@@ -1,6 +1,6 @@
 # Layout Audit
 
-在 Stage 4 `LAYOUT VERIFICATION AND TRIAGE` 使用本文件。Audit 會建立真實 Manim mobjects 並把動畫直接推到穩定狀態，但不寫 frame 或 MP4。
+在 Stage 4 `LAYOUT VERIFICATION AND TRIAGE` 使用本文件。Audit 會建立真實 Manim mobjects、執行 Scene 並檢查每個穩定狀態，但不寫入 frame 或 MP4。Scene Writer 只需撰寫正常動畫與必要 checkpoint，不需為 audit 改寫播放方式。
 
 ## 執行輸入與 Preflight
 
@@ -42,7 +42,7 @@ Validator 必須保留完整 finding，不得省略、截斷、摘要改寫、�
 
 ## 元件責任
 
-- `run_layout_audit.py`：載入 Scene、套用 render profile、dry-run 動畫、套用精確例外、寫完整 report 並決定 exit code。
+- `run_layout_audit.py`：載入 Scene、套用 render profile、執行非渲染檢查、套用精確例外、寫完整 report 並決定 exit code。
 - `visible_layout_audit.py`：階層式掃描所有可見 leaf、frame overflow、碰撞、containment、文字遮擋與有限的 graph line narrow phase。
 - `scene_layout_audit.py`：讓 Scene Writer 建立具名 adapter checkpoint，並以 `register_graph_root()` 明確註冊 graph wrapper。
 - `summarize_layout_audit.py`：確定性聚合跨 checkpoint 的相同 finding pair，建立 derived summary/triage；不改變 raw findings 或 gate。
@@ -268,8 +268,9 @@ Triage 可限制展示的 warning/INFO group 數量以節省 context，但必須
 ## 限制
 
 - Dry-run 只檢查每次 `play()` 完成後與 final 的穩定狀態，不檢查 animation interpolation 中間影格。
+- 自訂動畫的最終狀態必須可重現，不能因 frame rate 或 callback 呼叫次數不同而改變；這類語意問題必須由 Writer／Reviewer 修正，不能依賴 audit 猜測預期結果。
 - Line narrow phase 只支援直線 start/end；曲線與其他 path 退回 AABB。同 root 的 fallback 仍是 best-effort `INFO`，可能保留非阻塞 false positive；跨 root 或 graph 外 fallback 維持嚴格，可能保留 blocking false positive。
 - Circle narrow phase 只適用 bounds 可確認為等寬等高的 `Circle`；非等比例縮放的 Circle 退回嚴格 AABB，可能保留 blocking false positive。Graph 內裝飾性 Circle 應避免被建模成獨立 node boundary，並由 Reviewer 檢查。
-- Text 使用整體/fallback bounds，不做 glyph-level geometry。
+- 文字遮擋以實際可繪製字形的範圍判斷，但不保證像素級精度。
 - 部分透明物件只依目前 opacity API 判斷，複雜 blending 可能仍有誤判。
 - Container bounds 只是 broad phase；scanner 不實作完整 graph topology 或一般計算幾何。
